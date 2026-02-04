@@ -205,8 +205,8 @@ var App = (function () {
     els.btnShare.addEventListener('click', exportShare);
     els.btnPackage.addEventListener('click', exportPackage);
     els.importInput.addEventListener('change', handleImport);
-    els.freqMin.addEventListener('change', applyFreqRange);
-    els.freqMax.addEventListener('change', applyFreqRange);
+    els.freqMin.addEventListener('input', applyFreqRange);
+    els.freqMax.addEventListener('input', applyFreqRange);
     els.btnFreqReset.addEventListener('click', resetFreqRange);
 
     // Drag and drop
