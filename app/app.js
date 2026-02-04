@@ -383,8 +383,12 @@ var App = (function () {
     chart.data.datasets[0].data = data;
     // Fit Y-axis: start at 0, max with 10% headroom based on fit range
     chart.options.scales.y.min = 0;
-    chart.options.scales.y.max = maxPower > 0 ? maxPower * 1.1 : undefined;
-    chart.update('none');
+    if (maxPower > 0) {
+      chart.options.scales.y.max = maxPower * 1.1;
+    } else {
+      delete chart.options.scales.y.max;
+    }
+    chart.update();
   }
 
   function applyFreqRange() {
