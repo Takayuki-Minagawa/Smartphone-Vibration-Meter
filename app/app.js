@@ -155,6 +155,9 @@ var App = (function () {
       })
     });
 
+    // Temporarily show spectrum container so Chart.js can measure dimensions
+    els.spectrumWrap.style.display = 'block';
+
     // Spectrum chart
     state.spectrumChart = new Chart(els.spectrumCanvas, {
       type: 'line',
@@ -182,6 +185,9 @@ var App = (function () {
         })
       })
     });
+
+    // Hide spectrum container again (waveform tab is shown by default)
+    els.spectrumWrap.style.display = 'none';
   }
 
   function bindEvents() {
@@ -275,7 +281,7 @@ var App = (function () {
 
   function updateLiveKPI() {
     var fs = Analysis.estimateFs(state.rawData);
-    var recent = state.rawData.slice(-100);
+    var recent = state.rawData.slice(-200);
     var dynamic = Analysis.removeGravity(recent);
     var rms = Analysis.calcRMS(dynamic);
     var peak = Analysis.calcPeak(dynamic);
@@ -289,6 +295,11 @@ var App = (function () {
     els.kpiDuration.textContent = durationS.toFixed(1);
     els.kpiSamples.textContent = state.rawData.length;
     els.kpiFpeak.textContent = '-';
+
+    // Live waveform update (only when waveform tab is active)
+    if (state.currentTab === 'waveform' && dynamic.length > 0) {
+      updateWaveformChart(dynamic);
+    }
   }
 
   function updateKPI(result) {
@@ -358,8 +369,12 @@ var App = (function () {
     els.waveformWrap.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
 
-    if (tab === 'waveform' && state.waveformChart) state.waveformChart.resize();
-    if (tab === 'spectrum' && state.spectrumChart) state.spectrumChart.resize();
+    // Defer resize to next event loop iteration so the browser
+    // has processed the display change and computed layout
+    setTimeout(function () {
+      if (tab === 'waveform' && state.waveformChart) state.waveformChart.resize();
+      if (tab === 'spectrum' && state.spectrumChart) state.spectrumChart.resize();
+    }, 0);
   }
 
   function updateUI() {
