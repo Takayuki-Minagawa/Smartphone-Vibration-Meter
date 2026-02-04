@@ -358,22 +358,29 @@ var App = (function () {
     var data = [];
     var maxPower = 0;
 
-    // User-specified frequency range for Y-axis fitting
+    // User-specified frequency range for display + Y-axis fitting
     var fitMin = parseFloat(els.freqMin.value);
     var fitMax = parseFloat(els.freqMax.value);
-    var hasFitRange = isFinite(fitMin) || isFinite(fitMax);
     if (!isFinite(fitMin)) fitMin = 0;
     if (!isFinite(fitMax)) fitMax = maxFreq;
+    fitMin = Math.max(0, Math.min(fitMin, maxFreq));
+    fitMax = Math.max(0, Math.min(fitMax, maxFreq));
+    if (fitMin > fitMax) {
+      var swap = fitMin;
+      fitMin = fitMax;
+      fitMax = swap;
+    }
 
     // Start from i=1 to skip DC component (i=0) which dominates the scale
     for (var i = 1; i < spectrum.freqs.length; i++) {
-      if (spectrum.freqs[i] > maxFreq) break;
       var freq = spectrum.freqs[i];
+      if (freq < fitMin) continue;
+      if (freq > fitMax) break;
       labels.push(freq.toFixed(1));
       data.push(spectrum.power[i]);
 
       // Track max power within the fit range only
-      if (freq >= fitMin && freq <= fitMax && spectrum.power[i] > maxPower) {
+      if (spectrum.power[i] > maxPower) {
         maxPower = spectrum.power[i];
       }
     }
