@@ -91,6 +91,15 @@
     <div class="chart-wrap" id="spectrumWrap" style="display:none">
       <canvas id="spectrumChart"></canvas>
     </div>
+    <div class="spectrum-range" id="spectrumRange" style="display:none">
+      <label class="range-label">Y-axis fit range (Hz):</label>
+      <div class="range-inputs">
+        <input type="number" id="freqMin" placeholder="Min" min="0" step="any">
+        <span class="range-sep">&ndash;</span>
+        <input type="number" id="freqMax" placeholder="Max" min="0" step="any">
+        <button class="btn btn-sm btn-secondary" id="btnFreqReset">Reset</button>
+      </div>
+    </div>
   </div>
 
   <!-- Export -->

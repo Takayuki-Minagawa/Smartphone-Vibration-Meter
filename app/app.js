@@ -78,6 +78,10 @@ var App = (function () {
     els.importWrap = document.getElementById('importWrap');
     els.toast = document.getElementById('toast');
     els.durationSelect = document.getElementById('durationSelect');
+    els.spectrumRange = document.getElementById('spectrumRange');
+    els.freqMin = document.getElementById('freqMin');
+    els.freqMax = document.getElementById('freqMax');
+    els.btnFreqReset = document.getElementById('btnFreqReset');
   }
 
   function setupCharts() {
@@ -201,6 +205,9 @@ var App = (function () {
     els.btnShare.addEventListener('click', exportShare);
     els.btnPackage.addEventListener('click', exportPackage);
     els.importInput.addEventListener('change', handleImport);
+    els.freqMin.addEventListener('change', applyFreqRange);
+    els.freqMax.addEventListener('change', applyFreqRange);
+    els.btnFreqReset.addEventListener('click', resetFreqRange);
 
     // Drag and drop
     var wrap = els.importWrap;
@@ -351,21 +358,45 @@ var App = (function () {
     var data = [];
     var maxPower = 0;
 
+    // User-specified frequency range for Y-axis fitting
+    var fitMin = parseFloat(els.freqMin.value);
+    var fitMax = parseFloat(els.freqMax.value);
+    var hasFitRange = isFinite(fitMin) || isFinite(fitMax);
+    if (!isFinite(fitMin)) fitMin = 0;
+    if (!isFinite(fitMax)) fitMax = maxFreq;
+
     // Start from i=1 to skip DC component (i=0) which dominates the scale
     for (var i = 1; i < spectrum.freqs.length; i++) {
       if (spectrum.freqs[i] > maxFreq) break;
-      labels.push(spectrum.freqs[i].toFixed(1));
+      var freq = spectrum.freqs[i];
+      labels.push(freq.toFixed(1));
       data.push(spectrum.power[i]);
-      if (spectrum.power[i] > maxPower) maxPower = spectrum.power[i];
+
+      // Track max power within the fit range only
+      if (freq >= fitMin && freq <= fitMax && spectrum.power[i] > maxPower) {
+        maxPower = spectrum.power[i];
+      }
     }
 
     var chart = state.spectrumChart;
     chart.data.labels = labels;
     chart.data.datasets[0].data = data;
-    // Fit Y-axis to data: start at 0, max with 10% headroom
+    // Fit Y-axis: start at 0, max with 10% headroom based on fit range
     chart.options.scales.y.min = 0;
     chart.options.scales.y.max = maxPower > 0 ? maxPower * 1.1 : undefined;
     chart.update('none');
+  }
+
+  function applyFreqRange() {
+    if (state.analysisResult && state.analysisResult.spectrum) {
+      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    }
+  }
+
+  function resetFreqRange() {
+    els.freqMin.value = '';
+    els.freqMax.value = '';
+    applyFreqRange();
   }
 
   function switchTab(tab) {
@@ -374,6 +405,7 @@ var App = (function () {
     els.tabSpectrum.classList.toggle('active', tab === 'spectrum');
     els.waveformWrap.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
+    els.spectrumRange.style.display = tab === 'spectrum' ? 'block' : 'none';
 
     // Defer resize to next event loop iteration so the browser
     // has processed the display change and computed layout

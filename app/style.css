@@ -309,6 +309,44 @@ body {
   color: #fff;
 }
 
+/* Spectrum frequency range controls */
+.spectrum-range {
+  padding: 8px 0 0;
+}
+
+.range-label {
+  font-size: 0.75rem;
+  color: var(--text3);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.range-inputs input[type="number"] {
+  width: 80px;
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--surface3);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  text-align: right;
+}
+
+.range-inputs input[type="number"]::placeholder {
+  color: var(--text3);
+}
+
+.range-sep {
+  color: var(--text3);
+  font-size: 0.85rem;
+}
+
 /* Responsive */
 @media (max-width: 360px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
