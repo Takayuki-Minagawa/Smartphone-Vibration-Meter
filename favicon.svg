@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f1923"/>
+      <stop offset="100%" stop-color="#1a2733"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0077b6"/>
+      <stop offset="50%" stop-color="#00b4d8"/>
+      <stop offset="100%" stop-color="#0077b6"/>
+    </linearGradient>
+  </defs>
+  <!-- Rounded square background -->
+  <rect width="512" height="512" rx="96" ry="96" fill="url(#bg)"/>
+  <!-- Vibration wave lines (3 concentric arcs on each side) -->
+  <!-- Left arcs -->
+  <path d="M140 200 Q108 256 140 312" fill="none" stroke="#0077b6" stroke-width="16" stroke-linecap="round" opacity="0.4"/>
+  <path d="M108 176 Q60 256 108 336" fill="none" stroke="#0077b6" stroke-width="14" stroke-linecap="round" opacity="0.25"/>
+  <!-- Right arcs -->
+  <path d="M372 200 Q404 256 372 312" fill="none" stroke="#0077b6" stroke-width="16" stroke-linecap="round" opacity="0.4"/>
+  <path d="M404 176 Q452 256 404 336" fill="none" stroke="#0077b6" stroke-width="14" stroke-linecap="round" opacity="0.25"/>
+  <!-- Center waveform -->
+  <path d="M168 256 L208 256 L228 148 L264 364 L300 148 L336 364 L356 256 L396 256"
+        fill="none" stroke="url(#wave)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Small dot accents -->
+  <circle cx="168" cy="256" r="8" fill="#00b4d8"/>
+  <circle cx="396" cy="256" r="8" fill="#00b4d8"/>
+</svg>
