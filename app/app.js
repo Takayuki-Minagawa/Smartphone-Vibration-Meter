@@ -13,13 +13,105 @@ var App = (function () {
     spectrumChart: null,
     liveUpdateTimer: null,
     currentTab: 'waveform',
-    sensorAvailable: false
+    sensorAvailable: false,
+    spectrumSelection: { x: true, y: true, z: true, mag: true },
+    zoom: { active: false, wrap: null, parent: null, next: null, controls: [] },
+    chartTheme: null,
+    statusKey: 'statusInit',
+    statusParams: null
   };
 
   var profile = null;
 
   // DOM refs
   var els = {};
+
+  var i18n = {
+    ja: {
+      title: '振動計測 - 計測',
+      themeLight: 'ライト',
+      themeDark: 'ダーク',
+      langToEn: 'English',
+      langToJa: '日本語',
+      statusInit: '初期化中...',
+      statusReady: '準備完了 | サンプリング ~{fs} Hz',
+      statusViewer: '閲覧モード（インポートのみ）',
+      statusRecording: '計測中...',
+      statusDone: '完了 | {samples} サンプル',
+      statusNoData: 'データがありません',
+      statusImported: 'インポート完了',
+      statusImportedAt: 'インポート完了（エクスポート日時: {date}）',
+      toastCsv: 'CSV を保存しました',
+      toastJson: 'JSON を保存しました',
+      toastZip: 'ZIP を保存しました',
+      toastPackage: 'パッケージを保存しました',
+      toastShare: '共有しました',
+      toastShareFail: '共有に失敗しました: {error}',
+      toastImportOk: 'インポートしました',
+      toastImportFail: 'インポートに失敗しました: {error}',
+      zoomWaveform: '時間波形',
+      zoomSpectrum: 'スペクトル',
+      axisTime: '時間 (s)',
+      axisAccel: '加速度 (m/s\u00b2)',
+      axisFreq: '周波数 (Hz)',
+      axisPower: 'パワー',
+      durationManual: '手動',
+      durationSec: '{value} 秒',
+      placeholderMin: '最小',
+      placeholderMax: '最大'
+    },
+    en: {
+      title: 'Vibration Meter - Measurement',
+      themeLight: 'Light',
+      themeDark: 'Dark',
+      langToEn: 'English',
+      langToJa: '日本語',
+      statusInit: 'Initializing...',
+      statusReady: 'Ready | fs: ~{fs} Hz',
+      statusViewer: 'Viewer Mode (import only)',
+      statusRecording: 'Recording...',
+      statusDone: 'Done | {samples} samples',
+      statusNoData: 'No data recorded',
+      statusImported: 'Imported',
+      statusImportedAt: 'Imported (exported: {date})',
+      toastCsv: 'CSV downloaded',
+      toastJson: 'JSON downloaded',
+      toastZip: 'ZIP downloaded',
+      toastPackage: 'Package downloaded',
+      toastShare: 'Shared',
+      toastShareFail: 'Share failed: {error}',
+      toastImportOk: 'Data imported successfully',
+      toastImportFail: 'Import failed: {error}',
+      zoomWaveform: 'Time Waveform',
+      zoomSpectrum: 'Spectrum',
+      axisTime: 'Time (s)',
+      axisAccel: 'Accel (m/s\u00b2)',
+      axisFreq: 'Frequency (Hz)',
+      axisPower: 'Power',
+      durationManual: 'Manual',
+      durationSec: '{value} sec',
+      placeholderMin: 'Min',
+      placeholderMax: 'Max'
+    }
+  };
+
+  function getLang() {
+    return document.documentElement.getAttribute('data-help-lang') === 'en' ? 'en' : 'ja';
+  }
+
+  function formatText(str, params) {
+    if (!params) return str;
+    return Object.keys(params).reduce(function (out, key) {
+      return out.replace(new RegExp('\\{' + key + '\\}', 'g'), params[key]);
+    }, str);
+  }
+
+  function t(key, params) {
+    var lang = getLang();
+    var dict = i18n[lang] || i18n.ja;
+    var str = dict[key] || i18n.ja[key] || key;
+    return formatText(str, params);
+  }
 
   function init() {
     // Check consent
@@ -33,16 +125,18 @@ var App = (function () {
     state.sensorAvailable = profile ? profile.sensorAvailable !== false : false;
 
     cacheDOMRefs();
+    initTheme();
+    initHelpLanguage();
     setupCharts();
     bindEvents();
+    readSpectrumSelection();
     updateUI();
 
     // Show profile info / viewer mode message
     if (state.sensorAvailable && profile) {
-      els.statusText.textContent =
-        'Ready | fs: ~' + profile.fsHz.toFixed(0) + ' Hz';
+      setStatus('statusReady', { fs: profile.fsHz.toFixed(0) });
     } else {
-      els.statusText.textContent = 'Viewer Mode (import only)';
+      setStatus('statusViewer');
       els.statusDot.classList.remove('ready', 'recording');
     }
 
@@ -69,6 +163,7 @@ var App = (function () {
     els.spectrumWrap = document.getElementById('spectrumWrap');
     els.tabWaveform = document.getElementById('tabWaveform');
     els.tabSpectrum = document.getElementById('tabSpectrum');
+    els.btnZoom = document.getElementById('btnZoom');
     els.btnCsv = document.getElementById('btnCsv');
     els.btnJson = document.getElementById('btnJson');
     els.btnZip = document.getElementById('btnZip');
@@ -79,12 +174,164 @@ var App = (function () {
     els.toast = document.getElementById('toast');
     els.durationSelect = document.getElementById('durationSelect');
     els.spectrumRange = document.getElementById('spectrumRange');
+    els.spectrumNote = document.getElementById('spectrumNote');
+    els.spectrumComponents = document.getElementById('spectrumComponents');
     els.freqMin = document.getElementById('freqMin');
     els.freqMax = document.getElementById('freqMax');
     els.btnFreqReset = document.getElementById('btnFreqReset');
+    els.specX = document.getElementById('specX');
+    els.specY = document.getElementById('specY');
+    els.specZ = document.getElementById('specZ');
+    els.specMag = document.getElementById('specMag');
+    els.btnSpecAll = document.getElementById('btnSpecAll');
+    els.btnSpecMag = document.getElementById('btnSpecMag');
+    els.btnLangToggle = document.getElementById('btnLangToggle');
+    els.btnTheme = document.getElementById('btnTheme');
+    els.btnHelp = document.getElementById('btnHelp');
+    els.helpOverlay = document.getElementById('helpOverlay');
+    els.btnHelpClose = document.getElementById('btnHelpClose');
+    els.btnLangJa = document.getElementById('btnLangJa');
+    els.btnLangEn = document.getElementById('btnLangEn');
+    els.zoomOverlay = document.getElementById('zoomOverlay');
+    els.btnZoomClose = document.getElementById('btnZoomClose');
+    els.zoomControls = document.getElementById('zoomControls');
+    els.zoomChartHost = document.getElementById('zoomChartHost');
+    els.zoomTitle = document.getElementById('zoomTitle');
+  }
+
+  function initTheme() {
+    var saved = localStorage.getItem('vibmeter_theme');
+    var prefersLight = window.matchMedia &&
+      window.matchMedia('(prefers-color-scheme: light)').matches;
+    var theme = saved || (prefersLight ? 'light' : 'dark');
+    setTheme(theme);
+  }
+
+  function initHelpLanguage() {
+    var saved = localStorage.getItem('vibmeter_help_lang');
+    setHelpLanguage(saved || 'ja');
+  }
+
+  function setHelpLanguage(lang) {
+    var next = lang === 'en' ? 'en' : 'ja';
+    document.documentElement.setAttribute('data-help-lang', next);
+    document.documentElement.lang = next;
+    localStorage.setItem('vibmeter_help_lang', next);
+    updateHelpLangButtons(next);
+    updateLangToggleButton(next);
+    updateDurationOptions();
+    updatePlaceholders();
+    updateTitle();
+    updateChartLabels();
+    refreshStatus();
+    updateThemeButton(document.documentElement.getAttribute('data-theme') || 'dark');
+    updateZoomTitle();
+  }
+
+  function updateHelpLangButtons(lang) {
+    if (!els.btnLangJa || !els.btnLangEn) return;
+    els.btnLangJa.classList.toggle('is-active', lang === 'ja');
+    els.btnLangEn.classList.toggle('is-active', lang === 'en');
+  }
+
+  function updateLangToggleButton(lang) {
+    if (!els.btnLangToggle) return;
+    els.btnLangToggle.textContent = lang === 'ja' ? t('langToEn') : t('langToJa');
+  }
+
+  function updateTitle() {
+    document.title = t('title');
+  }
+
+  function updateDurationOptions() {
+    if (!els.durationSelect) return;
+    var options = els.durationSelect.options;
+    for (var i = 0; i < options.length; i++) {
+      var opt = options[i];
+      var val = parseInt(opt.value, 10);
+      if (val === 0) {
+        opt.textContent = t('durationManual');
+      } else if (isFinite(val)) {
+        opt.textContent = t('durationSec', { value: val });
+      }
+    }
+  }
+
+  function updatePlaceholders() {
+    if (els.freqMin) els.freqMin.placeholder = t('placeholderMin');
+    if (els.freqMax) els.freqMax.placeholder = t('placeholderMax');
+  }
+
+  function setStatus(key, params) {
+    state.statusKey = key;
+    state.statusParams = params || null;
+    if (els.statusText) {
+      els.statusText.textContent = t(key, params || {});
+    }
+  }
+
+  function refreshStatus() {
+    if (!state.statusKey) return;
+    setStatus(state.statusKey, state.statusParams || {});
+  }
+
+  function updateZoomTitle() {
+    if (!els.zoomTitle || !state.zoom.active) return;
+    els.zoomTitle.textContent = state.currentTab === 'spectrum'
+      ? t('zoomSpectrum')
+      : t('zoomWaveform');
+  }
+
+  function updateChartLabels() {
+    if (state.waveformChart) {
+      state.waveformChart.options.scales.x.title.text = t('axisTime');
+      state.waveformChart.options.scales.y.title.text = t('axisAccel');
+      state.waveformChart.update('none');
+    }
+    if (state.spectrumChart) {
+      state.spectrumChart.options.scales.x.title.text = t('axisFreq');
+      state.spectrumChart.options.scales.y.title.text = t('axisPower');
+      state.spectrumChart.update('none');
+    }
+  }
+
+  function setTheme(theme) {
+    var next = theme === 'light' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    localStorage.setItem('vibmeter_theme', next);
+    updateThemeButton(next);
+    if (state.waveformChart || state.spectrumChart) {
+      applyChartTheme();
+    }
+  }
+
+  function updateThemeButton(theme) {
+    if (!els.btnTheme) return;
+    els.btnTheme.textContent = theme === 'dark' ? t('themeLight') : t('themeDark');
+  }
+
+  function toggleTheme() {
+    var current = document.documentElement.getAttribute('data-theme') || 'dark';
+    setTheme(current === 'dark' ? 'light' : 'dark');
+  }
+
+  function getChartTheme() {
+    var styles = getComputedStyle(document.documentElement);
+    return {
+      legend: styles.getPropertyValue('--chart-legend').trim(),
+      axis: styles.getPropertyValue('--chart-axis').trim(),
+      grid: styles.getPropertyValue('--chart-grid').trim(),
+      lineX: styles.getPropertyValue('--line-x').trim(),
+      lineY: styles.getPropertyValue('--line-y').trim(),
+      lineZ: styles.getPropertyValue('--line-z').trim(),
+      lineMag: styles.getPropertyValue('--line-mag').trim(),
+      linePower: styles.getPropertyValue('--line-power').trim()
+    };
   }
 
   function setupCharts() {
+    var theme = getChartTheme();
+    state.chartTheme = theme;
     var commonOptions = {
       responsive: true,
       maintainAspectRatio: false,
@@ -92,17 +339,17 @@ var App = (function () {
       plugins: {
         legend: {
           display: true,
-          labels: { color: '#a0aab4', font: { size: 10 } }
+          labels: { color: theme.legend, font: { size: 10 } }
         }
       },
       scales: {
         x: {
-          ticks: { color: '#6b7b8a', font: { size: 9 }, maxTicksLimit: 8 },
-          grid: { color: 'rgba(255,255,255,0.05)' }
+          ticks: { color: theme.axis, font: { size: 9 }, maxTicksLimit: 8 },
+          grid: { color: theme.grid }
         },
         y: {
-          ticks: { color: '#6b7b8a', font: { size: 9 }, maxTicksLimit: 6 },
-          grid: { color: 'rgba(255,255,255,0.05)' }
+          ticks: { color: theme.axis, font: { size: 9 }, maxTicksLimit: 6 },
+          grid: { color: theme.grid }
         }
       }
     };
@@ -116,7 +363,7 @@ var App = (function () {
           {
             label: 'X',
             data: [],
-            borderColor: '#e63946',
+            borderColor: theme.lineX,
             borderWidth: 1,
             pointRadius: 0,
             tension: 0
@@ -124,7 +371,7 @@ var App = (function () {
           {
             label: 'Y',
             data: [],
-            borderColor: '#2a9d8f',
+            borderColor: theme.lineY,
             borderWidth: 1,
             pointRadius: 0,
             tension: 0
@@ -132,7 +379,7 @@ var App = (function () {
           {
             label: 'Z',
             data: [],
-            borderColor: '#e9c46a',
+            borderColor: theme.lineZ,
             borderWidth: 1,
             pointRadius: 0,
             tension: 0
@@ -140,7 +387,7 @@ var App = (function () {
           {
             label: '|mag|',
             data: [],
-            borderColor: '#00b4d8',
+            borderColor: theme.lineMag,
             borderWidth: 1.5,
             pointRadius: 0,
             tension: 0
@@ -150,10 +397,10 @@ var App = (function () {
       options: Object.assign({}, commonOptions, {
         scales: Object.assign({}, commonOptions.scales, {
           x: Object.assign({}, commonOptions.scales.x, {
-            title: { display: true, text: 'Time (s)', color: '#6b7b8a', font: { size: 9 } }
+            title: { display: true, text: t('axisTime'), color: theme.axis, font: { size: 9 } }
           }),
           y: Object.assign({}, commonOptions.scales.y, {
-            title: { display: true, text: 'Accel (m/s\u00b2)', color: '#6b7b8a', font: { size: 9 } }
+            title: { display: true, text: t('axisAccel'), color: theme.axis, font: { size: 9 } }
           })
         })
       })
@@ -170,8 +417,8 @@ var App = (function () {
         datasets: [{
           label: 'Power',
           data: [],
-          borderColor: '#00b4d8',
-          backgroundColor: 'rgba(0,180,216,0.1)',
+          borderColor: theme.linePower,
+          backgroundColor: toRgba(theme.linePower, 0.12),
           borderWidth: 1.5,
           pointRadius: 0,
           fill: true,
@@ -181,10 +428,10 @@ var App = (function () {
       options: Object.assign({}, commonOptions, {
         scales: Object.assign({}, commonOptions.scales, {
           x: Object.assign({}, commonOptions.scales.x, {
-            title: { display: true, text: 'Frequency (Hz)', color: '#6b7b8a', font: { size: 9 } }
+            title: { display: true, text: t('axisFreq'), color: theme.axis, font: { size: 9 } }
           }),
           y: Object.assign({}, commonOptions.scales.y, {
-            title: { display: true, text: 'Power', color: '#6b7b8a', font: { size: 9 } }
+            title: { display: true, text: t('axisPower'), color: theme.axis, font: { size: 9 } }
           })
         })
       })
@@ -194,11 +441,88 @@ var App = (function () {
     els.spectrumWrap.style.display = 'none';
   }
 
+  function toRgba(color, alpha) {
+    if (!color) return 'rgba(0,0,0,' + alpha + ')';
+    var c = color.trim();
+    if (c.indexOf('rgb') === 0) {
+      var nums = c.replace(/rgba?\(|\)/g, '').split(',').map(function (v) {
+        return parseFloat(v);
+      });
+      return 'rgba(' + nums[0] + ',' + nums[1] + ',' + nums[2] + ',' + alpha + ')';
+    }
+    if (c[0] === '#') {
+      var hex = c.slice(1);
+      if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+      }
+      var r = parseInt(hex.slice(0, 2), 16);
+      var g = parseInt(hex.slice(2, 4), 16);
+      var b = parseInt(hex.slice(4, 6), 16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
+    return color;
+  }
+
+  function applyChartTheme() {
+    var theme = getChartTheme();
+    state.chartTheme = theme;
+
+    if (state.waveformChart) {
+      var wave = state.waveformChart;
+      wave.options.plugins.legend.labels.color = theme.legend;
+      wave.options.scales.x.ticks.color = theme.axis;
+      wave.options.scales.y.ticks.color = theme.axis;
+      wave.options.scales.x.grid.color = theme.grid;
+      wave.options.scales.y.grid.color = theme.grid;
+      wave.options.scales.x.title.color = theme.axis;
+      wave.options.scales.y.title.color = theme.axis;
+      wave.data.datasets[0].borderColor = theme.lineX;
+      wave.data.datasets[1].borderColor = theme.lineY;
+      wave.data.datasets[2].borderColor = theme.lineZ;
+      wave.data.datasets[3].borderColor = theme.lineMag;
+      wave.update('none');
+    }
+
+    if (state.spectrumChart) {
+      var spec = state.spectrumChart;
+      spec.options.plugins.legend.labels.color = theme.legend;
+      spec.options.scales.x.ticks.color = theme.axis;
+      spec.options.scales.y.ticks.color = theme.axis;
+      spec.options.scales.x.grid.color = theme.grid;
+      spec.options.scales.y.grid.color = theme.grid;
+      spec.options.scales.x.title.color = theme.axis;
+      spec.options.scales.y.title.color = theme.axis;
+
+      if (spec.data.datasets && spec.data.datasets.length > 0) {
+        for (var i = 0; i < spec.data.datasets.length; i++) {
+          var ds = spec.data.datasets[i];
+          if (ds.label === 'X') ds.borderColor = theme.lineX;
+          if (ds.label === 'Y') ds.borderColor = theme.lineY;
+          if (ds.label === 'Z') ds.borderColor = theme.lineZ;
+          if (ds.label === '|mag|') {
+            ds.borderColor = theme.lineMag;
+            ds.backgroundColor = toRgba(theme.lineMag, 0.12);
+          }
+          if (ds.label === 'Power') {
+            ds.borderColor = theme.linePower;
+            ds.backgroundColor = toRgba(theme.linePower, 0.12);
+          }
+        }
+      }
+      spec.update('none');
+    }
+
+    if (state.analysisResult && state.analysisResult.spectrum) {
+      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    }
+  }
+
   function bindEvents() {
     els.btnStart.addEventListener('click', startRecording);
     els.btnStop.addEventListener('click', stopRecording);
     els.tabWaveform.addEventListener('click', function () { switchTab('waveform'); });
     els.tabSpectrum.addEventListener('click', function () { switchTab('spectrum'); });
+    els.btnZoom.addEventListener('click', openZoom);
     els.btnCsv.addEventListener('click', exportCSV);
     els.btnJson.addEventListener('click', exportJSON);
     els.btnZip.addEventListener('click', exportZIP);
@@ -208,6 +532,37 @@ var App = (function () {
     els.freqMin.addEventListener('input', applyFreqRange);
     els.freqMax.addEventListener('input', applyFreqRange);
     els.btnFreqReset.addEventListener('click', resetFreqRange);
+    els.specX.addEventListener('change', handleSpectrumComponentChange);
+    els.specY.addEventListener('change', handleSpectrumComponentChange);
+    els.specZ.addEventListener('change', handleSpectrumComponentChange);
+    els.specMag.addEventListener('change', handleSpectrumComponentChange);
+    els.btnSpecAll.addEventListener('click', selectAllSpectrumComponents);
+    els.btnSpecMag.addEventListener('click', selectMagOnly);
+    els.btnLangToggle.addEventListener('click', function () {
+      setHelpLanguage(getLang() === 'ja' ? 'en' : 'ja');
+    });
+    els.btnTheme.addEventListener('click', toggleTheme);
+    els.btnHelp.addEventListener('click', openHelp);
+    els.btnHelpClose.addEventListener('click', closeHelp);
+    els.btnLangJa.addEventListener('click', function () { setHelpLanguage('ja'); });
+    els.btnLangEn.addEventListener('click', function () { setHelpLanguage('en'); });
+    els.btnZoomClose.addEventListener('click', closeZoom);
+    els.helpOverlay.addEventListener('click', function (e) {
+      if (e.target && e.target.getAttribute('data-close') === 'help') {
+        closeHelp();
+      }
+    });
+    els.zoomOverlay.addEventListener('click', function (e) {
+      if (e.target && e.target.getAttribute('data-close') === 'zoom') {
+        closeZoom();
+      }
+    });
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') {
+        if (state.zoom.active) closeZoom();
+        closeHelp();
+      }
+    });
 
     // Drag and drop
     var wrap = els.importWrap;
@@ -227,6 +582,135 @@ var App = (function () {
     });
   }
 
+  function syncOverlayState() {
+    var open = false;
+    if (els.helpOverlay && els.helpOverlay.classList.contains('is-open')) open = true;
+    if (els.zoomOverlay && els.zoomOverlay.classList.contains('is-open')) open = true;
+    document.body.classList.toggle('overlay-open', open);
+  }
+
+  function openHelp() {
+    els.helpOverlay.classList.add('is-open');
+    syncOverlayState();
+  }
+
+  function closeHelp() {
+    els.helpOverlay.classList.remove('is-open');
+    syncOverlayState();
+  }
+
+  function moveNodeTo(target, node) {
+    if (!node || !target) return null;
+    var record = { node: node, parent: node.parentNode, next: node.nextSibling };
+    target.appendChild(node);
+    return record;
+  }
+
+  function restoreNode(record) {
+    if (!record || !record.node || !record.parent) return;
+    if (record.next && record.next.parentNode === record.parent) {
+      record.parent.insertBefore(record.node, record.next);
+    } else {
+      record.parent.appendChild(record.node);
+    }
+  }
+
+  function openZoom() {
+    if (state.zoom.active) return;
+    var wrap = state.currentTab === 'spectrum' ? els.spectrumWrap : els.waveformWrap;
+    if (!wrap) return;
+    state.zoom.active = true;
+    state.zoom.wrap = wrap;
+    state.zoom.parent = wrap.parentNode;
+    state.zoom.next = wrap.nextSibling;
+    state.zoom.controls = [];
+
+    els.zoomTitle.textContent = state.currentTab === 'spectrum'
+      ? t('zoomSpectrum')
+      : t('zoomWaveform');
+    els.zoomChartHost.appendChild(wrap);
+    if (state.currentTab === 'spectrum') {
+      state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumNote));
+      state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumRange));
+      state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumComponents));
+    }
+    wrap.classList.add('zoom-target');
+    els.zoomOverlay.classList.add('is-open');
+    syncOverlayState();
+
+    setTimeout(function () {
+      if (state.currentTab === 'waveform' && state.waveformChart) state.waveformChart.resize();
+      if (state.currentTab === 'spectrum' && state.spectrumChart) state.spectrumChart.resize();
+    }, 0);
+  }
+
+  function closeZoom() {
+    if (!state.zoom.active || !state.zoom.wrap) return;
+    var wrap = state.zoom.wrap;
+    wrap.classList.remove('zoom-target');
+    if (state.zoom.next && state.zoom.next.parentNode === state.zoom.parent) {
+      state.zoom.parent.insertBefore(wrap, state.zoom.next);
+    } else {
+      state.zoom.parent.appendChild(wrap);
+    }
+    if (state.zoom.controls && state.zoom.controls.length > 0) {
+      for (var i = 0; i < state.zoom.controls.length; i++) {
+        restoreNode(state.zoom.controls[i]);
+      }
+    }
+    els.zoomOverlay.classList.remove('is-open');
+    state.zoom.active = false;
+    state.zoom.wrap = null;
+    state.zoom.parent = null;
+    state.zoom.next = null;
+    state.zoom.controls = [];
+    syncOverlayState();
+
+    setTimeout(function () {
+      if (state.currentTab === 'waveform' && state.waveformChart) state.waveformChart.resize();
+      if (state.currentTab === 'spectrum' && state.spectrumChart) state.spectrumChart.resize();
+    }, 0);
+  }
+
+  function readSpectrumSelection() {
+    var selection = {
+      x: !!els.specX.checked,
+      y: !!els.specY.checked,
+      z: !!els.specZ.checked,
+      mag: !!els.specMag.checked
+    };
+
+    if (!selection.x && !selection.y && !selection.z && !selection.mag) {
+      selection.mag = true;
+      els.specMag.checked = true;
+    }
+    state.spectrumSelection = selection;
+    return selection;
+  }
+
+  function handleSpectrumComponentChange() {
+    readSpectrumSelection();
+    if (state.analysisResult && state.analysisResult.spectrum) {
+      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    }
+  }
+
+  function selectAllSpectrumComponents() {
+    els.specX.checked = true;
+    els.specY.checked = true;
+    els.specZ.checked = true;
+    els.specMag.checked = true;
+    handleSpectrumComponentChange();
+  }
+
+  function selectMagOnly() {
+    els.specX.checked = false;
+    els.specY.checked = false;
+    els.specZ.checked = false;
+    els.specMag.checked = true;
+    handleSpectrumComponentChange();
+  }
+
   function startRecording() {
     state.rawData = [];
     state.analysisResult = null;
@@ -235,7 +719,7 @@ var App = (function () {
 
     els.statusDot.classList.remove('ready');
     els.statusDot.classList.add('recording');
-    els.statusText.textContent = 'Recording...';
+    setStatus('statusRecording');
 
     state.stopSensor = Sensor.startListening(function (data) {
       state.rawData.push(data);
@@ -277,10 +761,9 @@ var App = (function () {
       state.analysisResult = Analysis.analyze(state.rawData);
       updateKPI(state.analysisResult);
       updateCharts(state.analysisResult);
-      els.statusText.textContent =
-        'Done | ' + state.rawData.length + ' samples';
+      setStatus('statusDone', { samples: state.rawData.length });
     } else {
-      els.statusText.textContent = 'No data recorded';
+      setStatus('statusNoData');
     }
 
     updateUI();
@@ -351,12 +834,20 @@ var App = (function () {
   }
 
   function updateSpectrumChart(spectrum, fs) {
-    if (!spectrum || spectrum.freqs.length === 0) return;
+    if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
+      var emptyChart = state.spectrumChart;
+      emptyChart.data.labels = [];
+      emptyChart.data.datasets = [];
+      emptyChart.update('none');
+      return;
+    }
 
+    var theme = state.chartTheme || getChartTheme();
     var maxFreq = fs / 2;
     var labels = [];
-    var data = [];
     var maxPower = 0;
+    var freqs = spectrum.mag.freqs;
+    var indices = [];
 
     // User-specified frequency range for display + Y-axis fitting
     var fitMin = parseFloat(els.freqMin.value);
@@ -372,22 +863,51 @@ var App = (function () {
     }
 
     // Start from i=1 to skip DC component (i=0) which dominates the scale
-    for (var i = 1; i < spectrum.freqs.length; i++) {
-      var freq = spectrum.freqs[i];
+    for (var i = 1; i < freqs.length; i++) {
+      var freq = freqs[i];
       if (freq < fitMin) continue;
       if (freq > fitMax) break;
       labels.push(freq.toFixed(1));
-      data.push(spectrum.power[i]);
+      indices.push(i);
+    }
 
-      // Track max power within the fit range only
-      if (spectrum.power[i] > maxPower) {
-        maxPower = spectrum.power[i];
+    var selection = readSpectrumSelection();
+    var datasets = [];
+
+    function addDataset(key, label, color, fill) {
+      var spec = spectrum[key];
+      if (!spec || !spec.power || spec.power.length === 0) return;
+      var data = new Array(indices.length);
+      for (var j = 0; j < indices.length; j++) {
+        var idx = indices[j];
+        var v = spec.power[idx] || 0;
+        data[j] = v;
+        if (v > maxPower) maxPower = v;
       }
+      datasets.push({
+        label: label,
+        data: data,
+        borderColor: color,
+        backgroundColor: fill ? toRgba(color, 0.12) : 'transparent',
+        borderWidth: label === '|mag|' ? 1.5 : 1,
+        pointRadius: 0,
+        fill: !!fill,
+        tension: 0.2
+      });
+    }
+
+    if (selection.x) addDataset('x', 'X', theme.lineX, false);
+    if (selection.y) addDataset('y', 'Y', theme.lineY, false);
+    if (selection.z) addDataset('z', 'Z', theme.lineZ, false);
+    if (selection.mag) addDataset('mag', '|mag|', theme.lineMag, true);
+
+    if (datasets.length === 0) {
+      addDataset('mag', '|mag|', theme.lineMag, true);
     }
 
     var chart = state.spectrumChart;
     chart.data.labels = labels;
-    chart.data.datasets[0].data = data;
+    chart.data.datasets = datasets;
     // Fit Y-axis: start at 0, max with 10% headroom based on fit range
     chart.options.scales.y.min = 0;
     if (maxPower > 0) {
@@ -395,7 +915,7 @@ var App = (function () {
     } else {
       delete chart.options.scales.y.max;
     }
-    chart.update();
+    chart.update('none');
   }
 
   function applyFreqRange() {
@@ -411,12 +931,15 @@ var App = (function () {
   }
 
   function switchTab(tab) {
+    if (state.zoom.active) closeZoom();
     state.currentTab = tab;
     els.tabWaveform.classList.toggle('active', tab === 'waveform');
     els.tabSpectrum.classList.toggle('active', tab === 'spectrum');
     els.waveformWrap.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
+    els.spectrumNote.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumRange.style.display = tab === 'spectrum' ? 'block' : 'none';
+    els.spectrumComponents.style.display = tab === 'spectrum' ? 'grid' : 'none';
 
     // Defer resize to next event loop iteration so the browser
     // has processed the display change and computed layout
@@ -447,13 +970,13 @@ var App = (function () {
   function exportCSV() {
     if (!state.analysisResult) return;
     Export.downloadCSV(state.rawData, state.analysisResult.dynamic);
-    showToast('CSV downloaded');
+    showToast(t('toastCsv'));
   }
 
   function exportJSON() {
     if (!state.analysisResult) return;
     Export.downloadJSON(state.analysisResult, profile);
-    showToast('JSON downloaded');
+    showToast(t('toastJson'));
   }
 
   function exportZIP() {
@@ -464,7 +987,7 @@ var App = (function () {
       state.analysisResult,
       profile
     ).then(function () {
-      showToast('ZIP downloaded');
+      showToast(t('toastZip'));
     });
   }
 
@@ -476,10 +999,10 @@ var App = (function () {
       state.analysisResult,
       profile
     ).then(function () {
-      showToast('Shared');
+      showToast(t('toastShare'));
     }).catch(function (err) {
       if (err.name !== 'AbortError') {
-        showToast('Share failed: ' + err.message);
+        showToast(t('toastShareFail', { error: err.message }));
       }
     });
   }
@@ -487,7 +1010,7 @@ var App = (function () {
   function exportPackage() {
     if (!state.analysisResult) return;
     Export.downloadPackage(state.rawData, state.analysisResult, profile);
-    showToast('Package downloaded');
+    showToast(t('toastPackage'));
   }
 
   // Import handler
@@ -508,17 +1031,18 @@ var App = (function () {
         updateCharts(state.analysisResult);
         updateUI();
 
-        var info = 'Imported';
         if (result.exportedAt) {
-          info += ' (exported: ' + new Date(result.exportedAt).toLocaleString() + ')';
+          var exportedLabel = new Date(result.exportedAt).toLocaleString();
+          setStatus('statusImportedAt', { date: exportedLabel });
+        } else {
+          setStatus('statusImported');
         }
-        els.statusText.textContent = info;
         els.statusDot.classList.remove('recording');
         els.statusDot.classList.add('ready');
-        showToast('Data imported successfully');
+        showToast(t('toastImportOk'));
       })
       .catch(function (err) {
-        showToast('Import failed: ' + err.message);
+        showToast(t('toastImportFail', { error: err.message }));
       });
   }
 

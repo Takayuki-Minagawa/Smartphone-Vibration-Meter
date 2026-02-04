@@ -152,17 +152,17 @@ const Analysis = (function () {
 
   /**
    * Compute power spectrum
-   * @param {Array} dynamicData - [{t, dx, dy, dz, mag}]
+   * @param {Array} series - numeric series
    * @param {number} fs - sampling frequency
    * @returns {{freqs: Float64Array, power: Float64Array, fPeak: number}}
    */
-  function computeSpectrum(dynamicData, fs) {
-    if (dynamicData.length < 4) {
+  function computeSpectrumSeries(series, fs) {
+    if (series.length < 4) {
       return { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
     }
 
     // Zero-pad to next power of 2
-    var rawLen = dynamicData.length;
+    var rawLen = series.length;
     var n = 1;
     while (n < rawLen) n *= 2;
 
@@ -172,7 +172,7 @@ const Analysis = (function () {
 
     // Apply window and fill real part
     for (var i = 0; i < rawLen; i++) {
-      re[i] = dynamicData[i].mag * win[i];
+      re[i] = series[i] * win[i];
     }
     // Remaining are zero (zero-padded)
 
@@ -200,6 +200,20 @@ const Analysis = (function () {
   }
 
   /**
+   * Compute spectrum from dynamic acceleration data (magnitude)
+   * @param {Array} dynamicData - [{t, dx, dy, dz, mag}]
+   * @param {number} fs - sampling frequency
+   * @returns {{freqs: Float64Array, power: Float64Array, fPeak: number}}
+   */
+  function computeSpectrum(dynamicData, fs) {
+    var series = new Array(dynamicData.length);
+    for (var i = 0; i < dynamicData.length; i++) {
+      series[i] = dynamicData[i].mag;
+    }
+    return computeSpectrumSeries(series, fs);
+  }
+
+  /**
    * Run full analysis pipeline
    * @param {Array} rawData - [{t, ax, ay, az, hasGravity}]
    * @returns {Object} analysis results
@@ -211,9 +225,26 @@ const Analysis = (function () {
     var peak = calcPeak(dynamic);
     var peakToPeak = calcPeakToPeak(dynamic);
 
-    var spectrum = { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
+    var empty = { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
+    var spectrum = { mag: empty, x: empty, y: empty, z: empty };
     if (fs >= 10 && dynamic.length >= 16) {
-      spectrum = computeSpectrum(dynamic, fs);
+      var magSeries = new Array(dynamic.length);
+      var xSeries = new Array(dynamic.length);
+      var ySeries = new Array(dynamic.length);
+      var zSeries = new Array(dynamic.length);
+      for (var i = 0; i < dynamic.length; i++) {
+        var d = dynamic[i];
+        magSeries[i] = d.mag;
+        xSeries[i] = d.dx;
+        ySeries[i] = d.dy;
+        zSeries[i] = d.dz;
+      }
+      spectrum = {
+        mag: computeSpectrumSeries(magSeries, fs),
+        x: computeSpectrumSeries(xSeries, fs),
+        y: computeSpectrumSeries(ySeries, fs),
+        z: computeSpectrumSeries(zSeries, fs)
+      };
     }
 
     return {
@@ -221,7 +252,7 @@ const Analysis = (function () {
       rms: rms,
       peak: peak,
       peakToPeak: peakToPeak,
-      fPeak: spectrum.fPeak,
+      fPeak: spectrum.mag.fPeak,
       dynamic: dynamic,
       spectrum: spectrum,
       sampleCount: rawData.length,
@@ -236,6 +267,7 @@ const Analysis = (function () {
     calcPeakToPeak: calcPeakToPeak,
     estimateFs: estimateFs,
     computeSpectrum: computeSpectrum,
+    computeSpectrumSeries: computeSpectrumSeries,
     analyze: analyze
   };
 })();

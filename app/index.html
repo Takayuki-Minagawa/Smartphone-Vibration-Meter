@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-help-lang="ja">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-<title>Vibration Meter - Measurement</title>
+<title>振動計測 - 計測</title>
 <link rel="icon" type="image/svg+xml" href="../favicon.svg">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
@@ -14,67 +14,123 @@
 
   <!-- Header -->
   <div class="app-header">
-    <a class="back-link" href="../index.html">&larr; Top</a>
-    <h1>Vibration Meter</h1>
+    <a class="back-link" href="../index.html">
+      <span data-lang="ja">&larr; トップ</span>
+      <span data-lang="en">&larr; Top</span>
+    </a>
+    <h1>
+      <span data-lang="ja">振動計測</span>
+      <span data-lang="en">Vibration Meter</span>
+    </h1>
+    <div class="header-actions">
+      <button class="icon-btn" id="btnLangToggle" type="button" aria-label="Toggle language">English</button>
+      <button class="icon-btn" id="btnTheme" type="button" aria-label="Toggle theme">ライト</button>
+      <button class="icon-btn" id="btnHelp" type="button" aria-label="Open help">
+        <span data-lang="ja">ヘルプ</span>
+        <span data-lang="en">Help</span>
+      </button>
+    </div>
   </div>
 
   <!-- Status -->
   <div class="status-bar">
     <span class="status-dot" id="statusDot"></span>
-    <span id="statusText">Initializing...</span>
+    <span id="statusText">初期化中...</span>
   </div>
 
   <!-- Controls -->
   <div class="btn-group">
-    <button class="btn btn-start" id="btnStart" disabled>Start</button>
-    <button class="btn btn-stop" id="btnStop" disabled>Stop</button>
+    <button class="btn btn-start" id="btnStart" disabled>
+      <span data-lang="ja">開始</span>
+      <span data-lang="en">Start</span>
+    </button>
+    <button class="btn btn-stop" id="btnStop" disabled>
+      <span data-lang="ja">停止</span>
+      <span data-lang="en">Stop</span>
+    </button>
   </div>
 
   <!-- Duration -->
   <div class="settings-bar">
-    <span>Auto-stop:</span>
+    <span>
+      <span data-lang="ja">自動停止</span>
+      <span data-lang="en">Auto-stop</span>:
+    </span>
     <select id="durationSelect">
-      <option value="0">Manual</option>
-      <option value="5">5 sec</option>
-      <option value="10" selected>10 sec</option>
-      <option value="30">30 sec</option>
-      <option value="60">60 sec</option>
+      <option value="0">手動</option>
+      <option value="5">5 秒</option>
+      <option value="10" selected>10 秒</option>
+      <option value="30">30 秒</option>
+      <option value="60">60 秒</option>
     </select>
   </div>
 
   <!-- KPI -->
   <div class="card">
-    <div class="card-title">Measurement Results</div>
+    <div class="card-title">
+      <span data-lang="ja">計測結果</span>
+      <span data-lang="en">Measurement Results</span>
+    </div>
     <div class="kpi-grid">
       <div class="kpi-item">
         <div class="kpi-value" id="kpiRms">-</div>
-        <div class="kpi-label">RMS</div>
+        <div class="kpi-label">
+          <span data-lang="ja">RMS</span>
+          <span data-lang="en">RMS</span>
+        </div>
         <div class="kpi-unit">m/s&sup2;</div>
       </div>
       <div class="kpi-item">
         <div class="kpi-value" id="kpiPeak">-</div>
-        <div class="kpi-label">Peak</div>
+        <div class="kpi-label">
+          <span data-lang="ja">ピーク</span>
+          <span data-lang="en">Peak</span>
+        </div>
         <div class="kpi-unit">m/s&sup2;</div>
       </div>
       <div class="kpi-item">
         <div class="kpi-value" id="kpiFsHz">-</div>
-        <div class="kpi-label">Sample Rate</div>
-        <div class="kpi-unit">Hz</div>
+        <div class="kpi-label">
+          <span data-lang="ja">サンプル周波数</span>
+          <span data-lang="en">Sample Rate</span>
+        </div>
+        <div class="kpi-unit">
+          <span data-lang="ja">Hz</span>
+          <span data-lang="en">Hz</span>
+        </div>
       </div>
       <div class="kpi-item">
         <div class="kpi-value" id="kpiFpeak">-</div>
-        <div class="kpi-label">Dominant f</div>
-        <div class="kpi-unit">Hz</div>
+        <div class="kpi-label">
+          <span data-lang="ja">卓越周波数</span>
+          <span data-lang="en">Dominant f</span>
+        </div>
+        <div class="kpi-unit">
+          <span data-lang="ja">Hz</span>
+          <span data-lang="en">Hz</span>
+        </div>
       </div>
       <div class="kpi-item">
         <div class="kpi-value" id="kpiDuration">-</div>
-        <div class="kpi-label">Duration</div>
-        <div class="kpi-unit">sec</div>
+        <div class="kpi-label">
+          <span data-lang="ja">計測時間</span>
+          <span data-lang="en">Duration</span>
+        </div>
+        <div class="kpi-unit">
+          <span data-lang="ja">秒</span>
+          <span data-lang="en">sec</span>
+        </div>
       </div>
       <div class="kpi-item">
         <div class="kpi-value" id="kpiSamples">-</div>
-        <div class="kpi-label">Samples</div>
-        <div class="kpi-unit">count</div>
+        <div class="kpi-label">
+          <span data-lang="ja">サンプル数</span>
+          <span data-lang="en">Samples</span>
+        </div>
+        <div class="kpi-unit">
+          <span data-lang="ja">件</span>
+          <span data-lang="en">count</span>
+        </div>
       </div>
     </div>
   </div>
@@ -82,8 +138,20 @@
   <!-- Charts -->
   <div class="card">
     <div class="tab-bar">
-      <button class="tab-btn active" id="tabWaveform">Time Waveform</button>
-      <button class="tab-btn" id="tabSpectrum">Spectrum</button>
+      <div class="tab-group">
+        <button class="tab-btn active" id="tabWaveform">
+          <span data-lang="ja">時間波形</span>
+          <span data-lang="en">Time Waveform</span>
+        </button>
+        <button class="tab-btn" id="tabSpectrum">
+          <span data-lang="ja">スペクトル</span>
+          <span data-lang="en">Spectrum</span>
+        </button>
+      </div>
+      <button class="btn btn-sm btn-secondary tab-action" id="btnZoom" type="button">
+        <span data-lang="ja">拡大</span>
+        <span data-lang="en">Zoom</span>
+      </button>
     </div>
     <div class="chart-wrap" id="waveformWrap">
       <canvas id="waveformChart"></canvas>
@@ -91,36 +159,83 @@
     <div class="chart-wrap" id="spectrumWrap" style="display:none">
       <canvas id="spectrumChart"></canvas>
     </div>
+    <div class="spectrum-note" id="spectrumNote" style="display:none">
+      <span data-lang="ja">スペクトルは重力除去後の動的加速度から算出します。下の成分で切替できます。</span>
+      <span data-lang="en">Spectrum is computed from dynamic acceleration (gravity removed). Select components below.</span>
+    </div>
     <div class="spectrum-range" id="spectrumRange" style="display:none">
-      <label class="range-label">Frequency range (Hz):</label>
+      <label class="range-label">
+        <span data-lang="ja">周波数範囲 (Hz)</span>
+        <span data-lang="en">Frequency range (Hz)</span>:
+      </label>
       <div class="range-inputs">
-        <input type="number" id="freqMin" placeholder="Min" min="0" step="any">
+        <input type="number" id="freqMin" placeholder="最小" min="0" step="any">
         <span class="range-sep">&ndash;</span>
-        <input type="number" id="freqMax" placeholder="Max" min="0" step="any">
-        <button class="btn btn-sm btn-secondary" id="btnFreqReset">Reset</button>
+        <input type="number" id="freqMax" placeholder="最大" min="0" step="any">
+        <button class="btn btn-sm btn-secondary" id="btnFreqReset">
+          <span data-lang="ja">リセット</span>
+          <span data-lang="en">Reset</span>
+        </button>
+      </div>
+    </div>
+    <div class="spectrum-components" id="spectrumComponents" style="display:none">
+      <div class="components-label">
+        <span data-lang="ja">成分</span>
+        <span data-lang="en">Components</span>:
+      </div>
+      <div class="components-options">
+        <label class="check-pill"><input type="checkbox" id="specX" checked> X</label>
+        <label class="check-pill"><input type="checkbox" id="specY" checked> Y</label>
+        <label class="check-pill"><input type="checkbox" id="specZ" checked> Z</label>
+        <label class="check-pill"><input type="checkbox" id="specMag" checked> |mag|</label>
+      </div>
+      <div class="components-actions">
+        <button class="btn btn-sm btn-secondary" id="btnSpecAll">
+          <span data-lang="ja">全て</span>
+          <span data-lang="en">All</span>
+        </button>
+        <button class="btn btn-sm btn-secondary" id="btnSpecMag">
+          <span data-lang="ja">|mag| のみ</span>
+          <span data-lang="en">|mag| only</span>
+        </button>
       </div>
     </div>
   </div>
 
   <!-- Export -->
   <div class="card">
-    <div class="card-title">Export / Share</div>
+    <div class="card-title">
+      <span data-lang="ja">エクスポート / 共有</span>
+      <span data-lang="en">Export / Share</span>
+    </div>
     <div class="export-grid">
       <button class="btn btn-secondary" id="btnCsv" disabled>CSV</button>
       <button class="btn btn-secondary" id="btnJson" disabled>JSON</button>
       <button class="btn btn-secondary" id="btnZip" disabled>ZIP</button>
-      <button class="btn btn-secondary" id="btnPackage" disabled>Package</button>
+      <button class="btn btn-secondary" id="btnPackage" disabled>
+        <span data-lang="ja">パッケージ</span>
+        <span data-lang="en">Package</span>
+      </button>
     </div>
     <div style="margin-top:8px">
-      <button class="btn btn-primary" id="btnShare" disabled>Share</button>
+      <button class="btn btn-primary" id="btnShare" disabled>
+        <span data-lang="ja">共有</span>
+        <span data-lang="en">Share</span>
+      </button>
     </div>
   </div>
 
   <!-- Import -->
   <div class="card">
-    <div class="card-title">Import</div>
+    <div class="card-title">
+      <span data-lang="ja">インポート</span>
+      <span data-lang="en">Import</span>
+    </div>
     <div class="file-input-wrap" id="importWrap">
-      <div class="file-label">Drop file here or tap to select (.json / .zip)</div>
+      <div class="file-label">
+        <span data-lang="ja">ここにファイルをドロップ、またはタップして選択（.json / .zip）</span>
+        <span data-lang="en">Drop file here or tap to select (.json / .zip)</span>
+      </div>
       <input type="file" id="importInput" accept=".json,.zip">
     </div>
   </div>
@@ -129,6 +244,73 @@
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>
+
+<!-- Help overlay -->
+<div class="overlay" id="helpOverlay" aria-hidden="true">
+  <div class="overlay-backdrop" data-close="help"></div>
+  <div class="overlay-panel">
+    <div class="overlay-header">
+      <div class="overlay-title">
+        <span data-lang="ja">簡易マニュアル</span>
+        <span data-lang="en">Quick Manual</span>
+      </div>
+      <div class="overlay-actions">
+        <div class="lang-switch" role="group" aria-label="Manual language">
+          <button class="lang-btn" id="btnLangJa" type="button">日本語</button>
+          <button class="lang-btn" id="btnLangEn" type="button">English</button>
+        </div>
+        <button class="btn btn-sm btn-secondary" id="btnHelpClose" type="button">
+          <span data-lang="ja">閉じる</span>
+          <span data-lang="en">Close</span>
+        </button>
+      </div>
+    </div>
+    <div class="overlay-body">
+      <div class="manual-block">
+        <div class="manual-title" data-lang="ja">計測</div>
+        <div class="manual-text" data-lang="ja">端末を固定し、<strong>開始</strong> で計測開始。<strong>停止</strong> または 自動停止 で終了します。</div>
+        <div class="manual-title" data-lang="en">Measurement</div>
+        <div class="manual-text" data-lang="en">Stabilize the phone, then press <strong>Start</strong>. Stop with <strong>Stop</strong> or Auto-stop.</div>
+      </div>
+      <div class="manual-block">
+        <div class="manual-title" data-lang="ja">波形 / スペクトル</div>
+        <div class="manual-text" data-lang="ja">スペクトルは重力除去後の加速度成分（X/Y/Z/|mag|）の周波数分布です。成分は下のチェックで切替できます。</div>
+        <div class="manual-title" data-lang="en">Waveform / Spectrum</div>
+        <div class="manual-text" data-lang="en">Spectrum shows dynamic acceleration components (X/Y/Z/|mag|) after gravity removal. Use the checkboxes to select components.</div>
+      </div>
+      <div class="manual-block">
+        <div class="manual-title" data-lang="ja">拡大表示</div>
+        <div class="manual-text" data-lang="ja"><strong>拡大</strong> でグラフを全画面に拡大できます。</div>
+        <div class="manual-title" data-lang="en">Zoom</div>
+        <div class="manual-text" data-lang="en">Use <strong>Zoom</strong> to view charts in full screen.</div>
+      </div>
+      <div class="manual-block">
+        <div class="manual-title" data-lang="ja">エクスポート / インポート</div>
+        <div class="manual-text" data-lang="ja">CSV/JSON/ZIP/パッケージ で保存し、インポート から復元できます。</div>
+        <div class="manual-title" data-lang="en">Export / Import</div>
+        <div class="manual-text" data-lang="en">Save as CSV/JSON/ZIP/Package and restore from Import.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Zoom overlay -->
+<div class="overlay" id="zoomOverlay" aria-hidden="true">
+  <div class="overlay-backdrop" data-close="zoom"></div>
+  <div class="overlay-panel zoom-panel">
+    <div class="overlay-header">
+      <div class="overlay-title" id="zoomTitle">グラフ</div>
+      <button class="btn btn-sm btn-secondary" id="btnZoomClose" type="button">
+        <span data-lang="ja">閉じる</span>
+        <span data-lang="en">Close</span>
+      </button>
+    </div>
+    <div class="overlay-body zoom-body">
+      <div class="zoom-controls" id="zoomControls"></div>
+      <div class="zoom-chart" id="zoomChartHost"></div>
+    </div>
+  </div>
+</div>
 
 <!-- App scripts (order matters) -->
 <script src="sensor.js"></script>
