@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Vibration Meter - Measurement</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3/dist/jszip.min.js"></script>
+</head>
+<body>
+<div class="app-container">
+
+  <!-- Header -->
+  <div class="app-header">
+    <a class="back-link" href="../index.html">&larr; Top</a>
+    <h1>Vibration Meter</h1>
+  </div>
+
+  <!-- Status -->
+  <div class="status-bar">
+    <span class="status-dot" id="statusDot"></span>
+    <span id="statusText">Initializing...</span>
+  </div>
+
+  <!-- Controls -->
+  <div class="btn-group">
+    <button class="btn btn-start" id="btnStart" disabled>Start</button>
+    <button class="btn btn-stop" id="btnStop" disabled>Stop</button>
+  </div>
+
+  <!-- Duration -->
+  <div class="settings-bar">
+    <span>Auto-stop:</span>
+    <select id="durationSelect">
+      <option value="0">Manual</option>
+      <option value="5">5 sec</option>
+      <option value="10" selected>10 sec</option>
+      <option value="30">30 sec</option>
+      <option value="60">60 sec</option>
+    </select>
+  </div>
+
+  <!-- KPI -->
+  <div class="card">
+    <div class="card-title">Measurement Results</div>
+    <div class="kpi-grid">
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiRms">-</div>
+        <div class="kpi-label">RMS</div>
+        <div class="kpi-unit">m/s&sup2;</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiPeak">-</div>
+        <div class="kpi-label">Peak</div>
+        <div class="kpi-unit">m/s&sup2;</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiFsHz">-</div>
+        <div class="kpi-label">Sample Rate</div>
+        <div class="kpi-unit">Hz</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiFpeak">-</div>
+        <div class="kpi-label">Dominant f</div>
+        <div class="kpi-unit">Hz</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiDuration">-</div>
+        <div class="kpi-label">Duration</div>
+        <div class="kpi-unit">sec</div>
+      </div>
+      <div class="kpi-item">
+        <div class="kpi-value" id="kpiSamples">-</div>
+        <div class="kpi-label">Samples</div>
+        <div class="kpi-unit">count</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="card">
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabWaveform">Time Waveform</button>
+      <button class="tab-btn" id="tabSpectrum">Spectrum</button>
+    </div>
+    <div class="chart-wrap" id="waveformWrap">
+      <canvas id="waveformChart"></canvas>
+    </div>
+    <div class="chart-wrap" id="spectrumWrap" style="display:none">
+      <canvas id="spectrumChart"></canvas>
+    </div>
+  </div>
+
+  <!-- Export -->
+  <div class="card">
+    <div class="card-title">Export / Share</div>
+    <div class="export-grid">
+      <button class="btn btn-secondary" id="btnCsv" disabled>CSV</button>
+      <button class="btn btn-secondary" id="btnJson" disabled>JSON</button>
+      <button class="btn btn-secondary" id="btnZip" disabled>ZIP</button>
+      <button class="btn btn-secondary" id="btnPackage" disabled>Package</button>
+    </div>
+    <div style="margin-top:8px">
+      <button class="btn btn-primary" id="btnShare" disabled>Share</button>
+    </div>
+  </div>
+
+  <!-- Import -->
+  <div class="card">
+    <div class="card-title">Import</div>
+    <div class="file-input-wrap" id="importWrap">
+      <div class="file-label">Drop file here or tap to select (.json / .zip)</div>
+      <input type="file" id="importInput" accept=".json,.zip">
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<!-- App scripts (order matters) -->
+<script src="sensor.js"></script>
+<script src="analysis.js"></script>
+<script src="export.js"></script>
+<script src="import.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

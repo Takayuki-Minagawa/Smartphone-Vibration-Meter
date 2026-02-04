@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Smartphone Vibration Meter</title>
+<style>
+:root {
+  --bg: #0f1923;
+  --surface: #1a2733;
+  --surface2: #243442;
+  --accent: #00b4d8;
+  --accent2: #0077b6;
+  --danger: #e63946;
+  --success: #2a9d8f;
+  --warn: #e9c46a;
+  --text: #e8e8e8;
+  --text2: #a0aab4;
+  --radius: 12px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.container {
+  width: 100%;
+  max-width: 480px;
+  padding: 24px 16px;
+}
+h1 {
+  font-size: 1.5rem;
+  text-align: center;
+  margin-bottom: 4px;
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.subtitle {
+  text-align: center;
+  color: var(--text2);
+  font-size: 0.85rem;
+  margin-bottom: 24px;
+}
+.card {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card h2 {
+  font-size: 1rem;
+  margin-bottom: 12px;
+  color: var(--accent);
+}
+.card p {
+  font-size: 0.875rem;
+  color: var(--text2);
+  line-height: 1.6;
+}
+.legal-links {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.legal-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 6px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+.legal-links a:hover {
+  background: rgba(0, 180, 216, 0.15);
+}
+.consent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+}
+.consent-row input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.consent-row label {
+  font-size: 0.85rem;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.5;
+}
+.btn {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+  text-align: center;
+  text-decoration: none;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  color: #fff;
+}
+.btn-success {
+  background: var(--success);
+  color: #fff;
+}
+.check-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 0.875rem;
+  border-bottom: 1px solid var(--surface2);
+}
+.check-item:last-child { border-bottom: none; }
+.check-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.75rem;
+  flex-shrink: 0;
+}
+.check-icon.ok { background: var(--success); }
+.check-icon.ng { background: var(--danger); }
+.check-icon.wait { background: var(--surface2); }
+.check-icon.warn { background: var(--warn); color: #333; }
+.result-box {
+  margin-top: 16px;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: center;
+}
+.result-ok { background: rgba(42,157,143,0.2); color: var(--success); }
+.result-ng { background: rgba(230,57,70,0.2); color: var(--danger); }
+.result-warn { background: rgba(233,196,106,0.2); color: var(--warn); }
+#diagnostics { display: none; }
+#goApp {
+  display: none;
+  margin-top: 12px;
+}
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--surface2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Vibration Meter</h1>
+  <p class="subtitle">Smartphone Vibration Measurement Tool</p>
+
+  <div class="card">
+    <h2>About</h2>
+    <p>
+      スマートフォンの加速度センサーを使い、振動を計測・分析するWebアプリです。
+      計測データはCSV/JSON/ZIPでダウンロードでき、Web Share APIによる共有も可能です。
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Terms & Privacy</h2>
+    <p>ご利用前に利用規約とプライバシーポリシーをご確認ください。</p>
+    <div class="legal-links">
+      <a href="legal/terms.html">利用規約</a>
+      <a href="legal/privacy.html">プライバシーポリシー</a>
+    </div>
+    <div class="consent-row">
+      <input type="checkbox" id="consentCheck">
+      <label for="consentCheck">利用規約・プライバシーポリシーに同意します</label>
+    </div>
+  </div>
+
+  <button class="btn btn-primary" id="startCheck" disabled>
+    センサーチェック開始
+  </button>
+
+  <div class="card" id="diagnostics">
+    <h2>Sensor Diagnostics</h2>
+    <div id="checkList"></div>
+    <div id="resultBox"></div>
+  </div>
+
+  <a class="btn btn-success" id="goApp" href="app/index.html">
+    計測画面へ進む
+  </a>
+
+  <a class="btn btn-secondary" id="goViewer" href="app/index.html" style="display:none; margin-top:12px; background:var(--surface); color:var(--text); border:1px solid var(--surface2);">
+    閲覧モードで進む（インポートのみ）
+  </a>
+</div>
+
+<script>
+(function() {
+  const consentCheck = document.getElementById('consentCheck');
+  const startCheck = document.getElementById('startCheck');
+  const diagnostics = document.getElementById('diagnostics');
+  const checkList = document.getElementById('checkList');
+  const resultBox = document.getElementById('resultBox');
+  const goApp = document.getElementById('goApp');
+  const goViewer = document.getElementById('goViewer');
+
+  // Restore consent from localStorage
+  if (localStorage.getItem('vibmeter_consent') === 'true') {
+    consentCheck.checked = true;
+    startCheck.disabled = false;
+  }
+
+  consentCheck.addEventListener('change', function() {
+    startCheck.disabled = !this.checked;
+    if (this.checked) {
+      localStorage.setItem('vibmeter_consent', 'true');
+    } else {
+      localStorage.removeItem('vibmeter_consent');
+    }
+  });
+
+  startCheck.addEventListener('click', async function() {
+    this.disabled = true;
+    diagnostics.style.display = 'block';
+    checkList.innerHTML = '';
+    resultBox.innerHTML = '';
+    goApp.style.display = 'none';
+    goViewer.style.display = 'none';
+
+    const results = [];
+
+    // 1. HTTPS Check
+    const isSecure = window.isSecureContext;
+    results.push({ label: 'HTTPS (Secure Context)', ok: isSecure });
+    renderChecks(results);
+
+    if (!isSecure) {
+      showResult('ng', 'HTTPS環境が必要です。GitHub PagesなどHTTPS対応のホストでお試しください。');
+      showViewerMode();
+      startCheck.disabled = false;
+      return;
+    }
+
+    // 2. DeviceMotionEvent
+    const hasMotion = typeof DeviceMotionEvent !== 'undefined';
+    results.push({ label: 'DeviceMotionEvent', ok: hasMotion });
+    renderChecks(results);
+
+    if (!hasMotion) {
+      showResult('ng', 'このブラウザはDeviceMotionEventに非対応です。Chrome/Safariをお試しください。');
+      showViewerMode();
+      startCheck.disabled = false;
+      return;
+    }
+
+    // 3. Permission (iOS)
+    let needsPermission = typeof DeviceMotionEvent.requestPermission === 'function';
+    if (needsPermission) {
+      results.push({ label: 'iOS Permission Request', status: 'requesting' });
+      renderChecks(results);
+      try {
+        const perm = await DeviceMotionEvent.requestPermission();
+        const granted = perm === 'granted';
+        results[results.length - 1] = { label: 'iOS Permission', ok: granted };
+        renderChecks(results);
+        if (!granted) {
+          showResult('ng', 'センサーの権限が拒否されました。ブラウザの設定からモーションセンサーを許可してください。');
+          showViewerMode();
+          startCheck.disabled = false;
+          return;
+        }
+      } catch (e) {
+        results[results.length - 1] = { label: 'iOS Permission', ok: false };
+        renderChecks(results);
+        showResult('ng', '権限リクエストに失敗しました: ' + e.message);
+        showViewerMode();
+        startCheck.disabled = false;
+        return;
+      }
+    } else {
+      results.push({ label: 'Permission', ok: true, note: 'Not required' });
+      renderChecks(results);
+    }
+
+    // 4. Probe sensor events
+    results.push({ label: 'Sensor Probe (2s)', status: 'probing' });
+    renderChecks(results);
+
+    const probeResult = await probeSensor(2000);
+
+    if (!probeResult.hasEvents) {
+      results[results.length - 1] = { label: 'Sensor Probe', ok: false };
+      renderChecks(results);
+      showResult('ng', 'センサーイベントが取得できませんでした。デスクトップPCでは計測できません。');
+      showViewerMode();
+      startCheck.disabled = false;
+      return;
+    }
+
+    results[results.length - 1] = {
+      label: 'Sensor Probe: ' + probeResult.count + ' events',
+      ok: true
+    };
+    renderChecks(results);
+
+    // 5. Capability Profile
+    const profile = {
+      sensorAvailable: true,
+      needsPermission: needsPermission,
+      hasAccG: probeResult.hasAccG,
+      hasAcc: probeResult.hasAcc,
+      hasRotationRate: probeResult.hasRotation,
+      fsHz: probeResult.fsHz,
+      eventCount: probeResult.count
+    };
+
+    results.push({
+      label: 'Sampling Rate: ~' + profile.fsHz.toFixed(1) + ' Hz',
+      ok: profile.fsHz >= 10,
+      warn: profile.fsHz < 25 && profile.fsHz >= 10
+    });
+
+    if (!profile.hasAccG && !profile.hasAcc) {
+      results.push({ label: 'Acceleration Data', ok: false });
+      renderChecks(results);
+      showResult('ng', '加速度データが取得できません。このデバイスでは計測できません。');
+      showViewerMode();
+      startCheck.disabled = false;
+      return;
+    }
+
+    results.push({
+      label: 'Acceleration: ' + (profile.hasAccG ? 'incl. gravity' : 'linear'),
+      ok: true
+    });
+    renderChecks(results);
+
+    // Save profile
+    sessionStorage.setItem('vibmeter_profile', JSON.stringify(profile));
+
+    if (profile.fsHz < 25) {
+      showResult('warn', 'センサーOK。サンプリングレートが低いため、スペクトル表示は参考値になります。');
+    } else {
+      showResult('ok', 'センサーチェック完了。計測可能です。');
+    }
+
+    goApp.style.display = 'block';
+    startCheck.disabled = false;
+  });
+
+  function probeSensor(durationMs) {
+    return new Promise(resolve => {
+      const timestamps = [];
+      let hasAccG = false;
+      let hasAcc = false;
+      let hasRotation = false;
+
+      function handler(e) {
+        timestamps.push(performance.now());
+
+        if (e.accelerationIncludingGravity) {
+          const g = e.accelerationIncludingGravity;
+          if (g.x !== null || g.y !== null || g.z !== null) hasAccG = true;
+        }
+        if (e.acceleration) {
+          const a = e.acceleration;
+          if (a.x !== null || a.y !== null || a.z !== null) hasAcc = true;
+        }
+        if (e.rotationRate) {
+          const r = e.rotationRate;
+          if (r.alpha !== null || r.beta !== null || r.gamma !== null) hasRotation = true;
+        }
+      }
+
+      window.addEventListener('devicemotion', handler);
+
+      setTimeout(() => {
+        window.removeEventListener('devicemotion', handler);
+
+        let fsHz = 0;
+        if (timestamps.length >= 2) {
+          const intervals = [];
+          for (let i = 1; i < timestamps.length; i++) {
+            intervals.push(timestamps[i] - timestamps[i - 1]);
+          }
+          const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+          fsHz = 1000 / avgInterval;
+        }
+
+        resolve({
+          hasEvents: timestamps.length > 0,
+          count: timestamps.length,
+          hasAccG,
+          hasAcc,
+          hasRotation,
+          fsHz
+        });
+      }, durationMs);
+    });
+  }
+
+  function renderChecks(items) {
+    checkList.innerHTML = items.map(item => {
+      let iconClass = 'wait';
+      let iconText = '...';
+      if (item.status === 'requesting' || item.status === 'probing') {
+        iconText = '<span class="spinner"></span>';
+      } else if (item.ok === true && item.warn) {
+        iconClass = 'warn';
+        iconText = '!';
+      } else if (item.ok === true) {
+        iconClass = 'ok';
+        iconText = '\u2713';
+      } else if (item.ok === false) {
+        iconClass = 'ng';
+        iconText = '\u2717';
+      }
+      const note = item.note ? ' <span style="color:var(--text2)">(' + item.note + ')</span>' : '';
+      return '<div class="check-item"><span class="check-icon ' + iconClass + '">' + iconText + '</span><span>' + item.label + note + '</span></div>';
+    }).join('');
+  }
+
+  function showViewerMode() {
+    // Save a no-sensor profile so app.js knows to disable measurement
+    sessionStorage.setItem('vibmeter_profile', JSON.stringify({
+      sensorAvailable: false,
+      needsPermission: false,
+      hasAccG: false,
+      hasAcc: false,
+      hasRotationRate: false,
+      fsHz: 0,
+      eventCount: 0
+    }));
+    goViewer.style.display = 'block';
+  }
+
+  function showResult(type, message) {
+    const cls = type === 'ok' ? 'result-ok' : type === 'warn' ? 'result-warn' : 'result-ng';
+    resultBox.innerHTML = '<div class="result-box ' + cls + '">' + message + '</div>';
+  }
+})();
+</script>
+</body>
+</html>
