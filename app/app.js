@@ -349,16 +349,22 @@ var App = (function () {
     var maxFreq = fs / 2;
     var labels = [];
     var data = [];
+    var maxPower = 0;
 
-    for (var i = 0; i < spectrum.freqs.length; i++) {
+    // Start from i=1 to skip DC component (i=0) which dominates the scale
+    for (var i = 1; i < spectrum.freqs.length; i++) {
       if (spectrum.freqs[i] > maxFreq) break;
       labels.push(spectrum.freqs[i].toFixed(1));
       data.push(spectrum.power[i]);
+      if (spectrum.power[i] > maxPower) maxPower = spectrum.power[i];
     }
 
     var chart = state.spectrumChart;
     chart.data.labels = labels;
     chart.data.datasets[0].data = data;
+    // Fit Y-axis to data: start at 0, max with 10% headroom
+    chart.options.scales.y.min = 0;
+    chart.options.scales.y.max = maxPower > 0 ? maxPower * 1.1 : undefined;
     chart.update('none');
   }
 
