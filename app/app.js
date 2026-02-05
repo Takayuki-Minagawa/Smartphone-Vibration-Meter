@@ -825,22 +825,78 @@ var App = (function () {
     var step = Math.max(1, Math.floor(dynamic.length / 2000));
     var labels = [];
     var dx = [], dy = [], dz = [], mag = [];
+    var chart = state.waveformChart;
+    var minInput = parseFloat(els.accelMin.value);
+    var maxInput = parseFloat(els.accelMax.value);
+    var hasMin = isFinite(minInput);
+    var hasMax = isFinite(maxInput);
+    var needFit = !(hasMin && hasMax);
+    var minAll = Infinity;
+    var maxAll = -Infinity;
+    var minFit = Infinity;
+    var maxFit = -Infinity;
+    var timeMin = null;
+    var timeMax = null;
+
+    if (chart && chart.options && chart.options.scales && chart.options.scales.x) {
+      var xScale = chart.options.scales.x;
+      var xMin = parseFloat(xScale.min);
+      var xMax = parseFloat(xScale.max);
+      if (isFinite(xMin)) timeMin = xMin;
+      if (isFinite(xMax)) timeMax = xMax;
+    }
 
     for (var i = 0; i < dynamic.length; i += step) {
       var d = dynamic[i];
-      labels.push(((d.t - t0) / 1000).toFixed(2));
+      var tSec = (d.t - t0) / 1000;
+      labels.push(tSec.toFixed(2));
       dx.push(d.dx);
       dy.push(d.dy);
       dz.push(d.dz);
       mag.push(d.mag);
+      if (needFit) {
+        minAll = Math.min(minAll, d.dx, d.dy, d.dz, d.mag);
+        maxAll = Math.max(maxAll, d.dx, d.dy, d.dz, d.mag);
+        var inRange = true;
+        if (timeMin !== null && tSec < timeMin) inRange = false;
+        if (timeMax !== null && tSec > timeMax) inRange = false;
+        if (inRange) {
+          minFit = Math.min(minFit, d.dx, d.dy, d.dz, d.mag);
+          maxFit = Math.max(maxFit, d.dx, d.dy, d.dz, d.mag);
+        }
+      }
     }
 
-    var chart = state.waveformChart;
     chart.data.labels = labels;
     chart.data.datasets[0].data = dx;
     chart.data.datasets[1].data = dy;
     chart.data.datasets[2].data = dz;
     chart.data.datasets[3].data = mag;
+    if (needFit) {
+      var minVal = isFinite(minFit) ? minFit : minAll;
+      var maxVal = isFinite(maxFit) ? maxFit : maxAll;
+      if (isFinite(minVal) && isFinite(maxVal)) {
+        var range = maxVal - minVal;
+        if (!isFinite(range) || range === 0) {
+          range = Math.max(0.5, Math.abs(maxVal) * 0.2);
+        }
+        var pad = range * 0.1;
+        if (!hasMin) {
+          var fittedMin = minVal - pad;
+          if (hasMax && fittedMin >= maxInput) {
+            fittedMin = maxInput - Math.max(0.5, Math.abs(maxInput) * 0.2);
+          }
+          chart.options.scales.y.min = fittedMin;
+        }
+        if (!hasMax) {
+          var fittedMax = maxVal + pad;
+          if (hasMin && fittedMax <= minInput) {
+            fittedMax = minInput + Math.max(0.5, Math.abs(minInput) * 0.2);
+          }
+          chart.options.scales.y.max = fittedMax;
+        }
+      }
+    }
     chart.update('none');
   }
 
