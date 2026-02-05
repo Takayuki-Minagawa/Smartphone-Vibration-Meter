@@ -41,12 +41,12 @@ var App = (function () {
       statusNoData: 'データがありません',
       statusImported: 'インポート完了',
       statusImportedAt: 'インポート完了（エクスポート日時: {date}）',
-      toastCsv: 'CSV を保存しました',
-      toastJson: 'JSON を保存しました',
-      toastZip: 'ZIP を保存しました',
-      toastPackage: 'パッケージを保存しました',
+      toastCsv: 'CSV を保存/共有しました',
+      toastJson: 'JSON を保存/共有しました',
+      toastZip: 'ZIP を保存/共有しました',
+      toastPackage: 'パッケージを保存/共有しました',
       toastShare: '共有しました',
-      toastShareFail: '共有に失敗しました: {error}',
+      toastShareFail: '保存/共有に失敗しました: {error}',
       toastImportOk: 'インポートしました',
       toastImportFail: 'インポートに失敗しました: {error}',
       zoomWaveform: '時間波形',
@@ -76,12 +76,12 @@ var App = (function () {
       statusNoData: 'No data recorded',
       statusImported: 'Imported',
       statusImportedAt: 'Imported (exported: {date})',
-      toastCsv: 'CSV downloaded',
-      toastJson: 'JSON downloaded',
-      toastZip: 'ZIP downloaded',
-      toastPackage: 'Package downloaded',
+      toastCsv: 'CSV saved/shared',
+      toastJson: 'JSON saved/shared',
+      toastZip: 'ZIP saved/shared',
+      toastPackage: 'Package saved/shared',
       toastShare: 'Shared',
-      toastShareFail: 'Share failed: {error}',
+      toastShareFail: 'Save/share failed: {error}',
       toastImportOk: 'Data imported successfully',
       toastImportFail: 'Import failed: {error}',
       zoomWaveform: 'Time Waveform',
@@ -144,10 +144,6 @@ var App = (function () {
       els.statusDot.classList.remove('ready', 'recording');
     }
 
-    // Show/hide share button
-    if (!Export.canShareFiles()) {
-      els.btnShare.style.display = 'none';
-    }
   }
 
   function cacheDOMRefs() {
@@ -172,7 +168,6 @@ var App = (function () {
     els.btnCsv = document.getElementById('btnCsv');
     els.btnJson = document.getElementById('btnJson');
     els.btnZip = document.getElementById('btnZip');
-    els.btnShare = document.getElementById('btnShare');
     els.btnPackage = document.getElementById('btnPackage');
     els.importInput = document.getElementById('importInput');
     els.importWrap = document.getElementById('importWrap');
@@ -537,7 +532,6 @@ var App = (function () {
     els.btnCsv.addEventListener('click', exportCSV);
     els.btnJson.addEventListener('click', exportJSON);
     els.btnZip.addEventListener('click', exportZIP);
-    els.btnShare.addEventListener('click', exportShare);
     els.btnPackage.addEventListener('click', exportPackage);
     els.importInput.addEventListener('change', handleImport);
     els.freqMin.addEventListener('input', applyFreqRange);
@@ -1058,55 +1052,56 @@ var App = (function () {
     els.btnCsv.disabled = !hasData;
     els.btnJson.disabled = !hasData;
     els.btnZip.disabled = !hasData;
-    els.btnShare.disabled = !hasData;
     els.btnPackage.disabled = !hasData;
   }
 
   // Export handlers
+  function handleExport(promise, toastKey) {
+    if (!promise || typeof promise.then !== 'function') {
+      showToast(t(toastKey));
+      return;
+    }
+    promise.then(function () {
+      showToast(t(toastKey));
+    }).catch(function (err) {
+      if (err && err.name === 'AbortError') return;
+      var msg = err && err.message ? err.message : String(err);
+      showToast(t('toastShareFail', { error: msg }));
+    });
+  }
+
   function exportCSV() {
     if (!state.analysisResult) return;
-    Export.downloadCSV(state.rawData, state.analysisResult.dynamic);
-    showToast(t('toastCsv'));
+    handleExport(
+      Export.downloadCSV(state.rawData, state.analysisResult.dynamic),
+      'toastCsv'
+    );
   }
 
   function exportJSON() {
     if (!state.analysisResult) return;
-    Export.downloadJSON(state.analysisResult, profile);
-    showToast(t('toastJson'));
+    handleExport(
+      Export.downloadJSON(state.analysisResult, profile),
+      'toastJson'
+    );
   }
 
   function exportZIP() {
     if (!state.analysisResult) return;
-    Export.downloadZIP(
+    handleExport(Export.downloadZIP(
       state.rawData,
       state.analysisResult.dynamic,
       state.analysisResult,
       profile
-    ).then(function () {
-      showToast(t('toastZip'));
-    });
-  }
-
-  function exportShare() {
-    if (!state.analysisResult) return;
-    Export.shareFiles(
-      state.rawData,
-      state.analysisResult.dynamic,
-      state.analysisResult,
-      profile
-    ).then(function () {
-      showToast(t('toastShare'));
-    }).catch(function (err) {
-      if (err.name !== 'AbortError') {
-        showToast(t('toastShareFail', { error: err.message }));
-      }
-    });
+    ), 'toastZip');
   }
 
   function exportPackage() {
     if (!state.analysisResult) return;
-    Export.downloadPackage(state.rawData, state.analysisResult, profile);
-    showToast(t('toastPackage'));
+    handleExport(
+      Export.downloadPackage(state.rawData, state.analysisResult, profile),
+      'toastPackage'
+    );
   }
 
   // Import handler

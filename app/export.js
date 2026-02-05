@@ -85,8 +85,7 @@ var Export = (function () {
   /**
    * Trigger file download
    */
-  function downloadFile(content, filename, mimeType) {
-    var blob = new Blob([content], { type: mimeType || 'application/octet-stream' });
+  function downloadBlob(blob, filename) {
     var url = URL.createObjectURL(blob);
     var a = document.createElement('a');
     a.href = url;
@@ -98,12 +97,60 @@ var Export = (function () {
   }
 
   /**
+   * Share with Web Share API when available; otherwise download.
+   * Returns a Promise resolved on completion. Rejects on AbortError only.
+   */
+  function shareOrDownload(contentOrBlob, filename, mimeType) {
+    var blob = contentOrBlob instanceof Blob
+      ? contentOrBlob
+      : new Blob([contentOrBlob], { type: mimeType || 'application/octet-stream' });
+
+    var file = null;
+    if (typeof File !== 'undefined') {
+      try {
+        file = new File([blob], filename, {
+          type: mimeType || blob.type || 'application/octet-stream'
+        });
+      } catch (e) {
+        file = null;
+      }
+    }
+
+    if (file && navigator.share) {
+      var canShare = true;
+      if (navigator.canShare) {
+        try {
+          canShare = navigator.canShare({ files: [file] });
+        } catch (e) {
+          canShare = false;
+        }
+      }
+
+      if (canShare) {
+        return navigator.share({
+          title: 'Vibration Measurement Data',
+          text: 'Vibration Meter measurement result',
+          files: [file]
+        }).catch(function (err) {
+          if (err && err.name === 'AbortError') {
+            throw err;
+          }
+          downloadBlob(blob, filename);
+        });
+      }
+    }
+
+    downloadBlob(blob, filename);
+    return Promise.resolve();
+  }
+
+  /**
    * Download CSV
    */
   function downloadCSV(rawData, dynamicData) {
     var csv = generateCSV(rawData, dynamicData);
     var ts = formatTimestamp();
-    downloadFile(csv, 'vibration_raw_' + ts + '.csv', 'text/csv');
+    return shareOrDownload(csv, 'vibration_raw_' + ts + '.csv', 'text/csv');
   }
 
   /**
@@ -112,7 +159,7 @@ var Export = (function () {
   function downloadJSON(analysisResult, profile) {
     var json = generateAnalysisJSON(analysisResult, profile);
     var ts = formatTimestamp();
-    downloadFile(json, 'vibration_analysis_' + ts + '.json', 'application/json');
+    return shareOrDownload(json, 'vibration_analysis_' + ts + '.json', 'application/json');
   }
 
   /**
@@ -121,7 +168,7 @@ var Export = (function () {
   function downloadPackage(rawData, analysisResult, profile) {
     var json = generatePackageJSON(rawData, analysisResult, profile);
     var ts = formatTimestamp();
-    downloadFile(json, 'vibration_package_' + ts + '.json', 'application/json');
+    return shareOrDownload(json, 'vibration_package_' + ts + '.json', 'application/json');
   }
 
   /**
@@ -130,8 +177,7 @@ var Export = (function () {
   function downloadZIP(rawData, dynamicData, analysisResult, profile) {
     if (typeof JSZip === 'undefined') {
       // Fallback: download package JSON
-      downloadPackage(rawData, analysisResult, profile);
-      return Promise.resolve();
+      return downloadPackage(rawData, analysisResult, profile);
     }
 
     var zip = new JSZip();
@@ -141,53 +187,8 @@ var Export = (function () {
     zip.file('vibration_package.json', generatePackageJSON(rawData, analysisResult, profile));
 
     return zip.generateAsync({ type: 'blob' }).then(function (blob) {
-      var url = URL.createObjectURL(blob);
-      var a = document.createElement('a');
-      a.href = url;
-      a.download = 'vibration_export_' + ts + '.zip';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+      return shareOrDownload(blob, 'vibration_export_' + ts + '.zip', 'application/zip');
     });
-  }
-
-  /**
-   * Share via Web Share API (file sharing)
-   */
-  function shareFiles(rawData, dynamicData, analysisResult, profile) {
-    var packageJSON = generatePackageJSON(rawData, analysisResult, profile);
-    var ts = formatTimestamp();
-    var file = new File(
-      [packageJSON],
-      'vibration_package_' + ts + '.json',
-      { type: 'application/json' }
-    );
-
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
-      return navigator.share({
-        title: 'Vibration Measurement Data',
-        text: 'Vibration Meter measurement result',
-        files: [file]
-      });
-    } else {
-      // Fallback to download
-      downloadPackage(rawData, analysisResult, profile);
-      return Promise.resolve();
-    }
-  }
-
-  /**
-   * Check if Web Share API with file sharing is available
-   */
-  function canShareFiles() {
-    if (!navigator.canShare) return false;
-    try {
-      var testFile = new File(['test'], 'test.json', { type: 'application/json' });
-      return navigator.canShare({ files: [testFile] });
-    } catch (e) {
-      return false;
-    }
   }
 
   function formatTimestamp() {
@@ -209,8 +210,6 @@ var Export = (function () {
     downloadJSON: downloadJSON,
     downloadPackage: downloadPackage,
     downloadZIP: downloadZIP,
-    shareFiles: shareFiles,
-    canShareFiles: canShareFiles,
     generatePackageJSON: generatePackageJSON
   };
 })();
