@@ -58,7 +58,9 @@ var App = (function () {
       durationManual: '手動',
       durationSec: '{value} 秒',
       placeholderMin: '最小',
-      placeholderMax: '最大'
+      placeholderMax: '最大',
+      placeholderStart: '開始',
+      placeholderEnd: '終了'
     },
     en: {
       title: 'Vibration Meter - Measurement',
@@ -91,7 +93,9 @@ var App = (function () {
       durationManual: 'Manual',
       durationSec: '{value} sec',
       placeholderMin: 'Min',
-      placeholderMax: 'Max'
+      placeholderMax: 'Max',
+      placeholderStart: 'Start',
+      placeholderEnd: 'End'
     }
   };
 
@@ -180,9 +184,9 @@ var App = (function () {
     els.freqMin = document.getElementById('freqMin');
     els.freqMax = document.getElementById('freqMax');
     els.btnFreqReset = document.getElementById('btnFreqReset');
-    els.accelMin = document.getElementById('accelMin');
-    els.accelMax = document.getElementById('accelMax');
-    els.btnAccelReset = document.getElementById('btnAccelReset');
+    els.timeMin = document.getElementById('timeMin');
+    els.timeMax = document.getElementById('timeMax');
+    els.btnTimeReset = document.getElementById('btnTimeReset');
     els.specX = document.getElementById('specX');
     els.specY = document.getElementById('specY');
     els.specZ = document.getElementById('specZ');
@@ -264,8 +268,8 @@ var App = (function () {
   function updatePlaceholders() {
     if (els.freqMin) els.freqMin.placeholder = t('placeholderMin');
     if (els.freqMax) els.freqMax.placeholder = t('placeholderMax');
-    if (els.accelMin) els.accelMin.placeholder = t('placeholderMin');
-    if (els.accelMax) els.accelMax.placeholder = t('placeholderMax');
+    if (els.timeMin) els.timeMin.placeholder = t('placeholderStart');
+    if (els.timeMax) els.timeMax.placeholder = t('placeholderEnd');
   }
 
   function setStatus(key, params) {
@@ -403,6 +407,7 @@ var App = (function () {
       options: Object.assign({}, commonOptions, {
         scales: Object.assign({}, commonOptions.scales, {
           x: Object.assign({}, commonOptions.scales.x, {
+            type: 'linear',
             title: { display: true, text: t('axisTime'), color: theme.axis, font: { size: 9 } }
           }),
           y: Object.assign({}, commonOptions.scales.y, {
@@ -538,9 +543,9 @@ var App = (function () {
     els.freqMin.addEventListener('input', applyFreqRange);
     els.freqMax.addEventListener('input', applyFreqRange);
     els.btnFreqReset.addEventListener('click', resetFreqRange);
-    els.accelMin.addEventListener('input', applyWaveformRange);
-    els.accelMax.addEventListener('input', applyWaveformRange);
-    els.btnAccelReset.addEventListener('click', resetWaveformRange);
+    els.timeMin.addEventListener('input', applyWaveformRange);
+    els.timeMax.addEventListener('input', applyWaveformRange);
+    els.btnTimeReset.addEventListener('click', resetWaveformRange);
     els.specX.addEventListener('change', handleSpectrumComponentChange);
     els.specY.addEventListener('change', handleSpectrumComponentChange);
     els.specZ.addEventListener('change', handleSpectrumComponentChange);
@@ -826,11 +831,6 @@ var App = (function () {
     var labels = [];
     var dx = [], dy = [], dz = [], mag = [];
     var chart = state.waveformChart;
-    var minInput = parseFloat(els.accelMin.value);
-    var maxInput = parseFloat(els.accelMax.value);
-    var hasMin = isFinite(minInput);
-    var hasMax = isFinite(maxInput);
-    var needFit = !(hasMin && hasMax);
     var minAll = Infinity;
     var maxAll = -Infinity;
     var minFit = Infinity;
@@ -849,21 +849,19 @@ var App = (function () {
     for (var i = 0; i < dynamic.length; i += step) {
       var d = dynamic[i];
       var tSec = (d.t - t0) / 1000;
-      labels.push(tSec.toFixed(2));
-      dx.push(d.dx);
-      dy.push(d.dy);
-      dz.push(d.dz);
-      mag.push(d.mag);
-      if (needFit) {
-        minAll = Math.min(minAll, d.dx, d.dy, d.dz, d.mag);
-        maxAll = Math.max(maxAll, d.dx, d.dy, d.dz, d.mag);
-        var inRange = true;
-        if (timeMin !== null && tSec < timeMin) inRange = false;
-        if (timeMax !== null && tSec > timeMax) inRange = false;
-        if (inRange) {
-          minFit = Math.min(minFit, d.dx, d.dy, d.dz, d.mag);
-          maxFit = Math.max(maxFit, d.dx, d.dy, d.dz, d.mag);
-        }
+      labels.push(tSec);
+      dx.push({ x: tSec, y: d.dx });
+      dy.push({ x: tSec, y: d.dy });
+      dz.push({ x: tSec, y: d.dz });
+      mag.push({ x: tSec, y: d.mag });
+      minAll = Math.min(minAll, d.dx, d.dy, d.dz, d.mag);
+      maxAll = Math.max(maxAll, d.dx, d.dy, d.dz, d.mag);
+      var inRange = true;
+      if (timeMin !== null && tSec < timeMin) inRange = false;
+      if (timeMax !== null && tSec > timeMax) inRange = false;
+      if (inRange) {
+        minFit = Math.min(minFit, d.dx, d.dy, d.dz, d.mag);
+        maxFit = Math.max(maxFit, d.dx, d.dy, d.dz, d.mag);
       }
     }
 
@@ -872,40 +870,31 @@ var App = (function () {
     chart.data.datasets[1].data = dy;
     chart.data.datasets[2].data = dz;
     chart.data.datasets[3].data = mag;
-    if (needFit) {
-      var minVal = isFinite(minFit) ? minFit : minAll;
-      var maxVal = isFinite(maxFit) ? maxFit : maxAll;
-      if (isFinite(minVal) && isFinite(maxVal)) {
-        var range = maxVal - minVal;
-        if (!isFinite(range) || range === 0) {
-          range = Math.max(0.5, Math.abs(maxVal) * 0.2);
-        }
-        var pad = range * 0.1;
-        if (!hasMin) {
-          var fittedMin = minVal - pad;
-          if (hasMax && fittedMin >= maxInput) {
-            fittedMin = maxInput - Math.max(0.5, Math.abs(maxInput) * 0.2);
-          }
-          chart.options.scales.y.min = fittedMin;
-        }
-        if (!hasMax) {
-          var fittedMax = maxVal + pad;
-          if (hasMin && fittedMax <= minInput) {
-            fittedMax = minInput + Math.max(0.5, Math.abs(minInput) * 0.2);
-          }
-          chart.options.scales.y.max = fittedMax;
-        }
+    var minVal = isFinite(minFit) ? minFit : minAll;
+    var maxVal = isFinite(maxFit) ? maxFit : maxAll;
+    if (isFinite(minVal) && isFinite(maxVal)) {
+      var range = maxVal - minVal;
+      if (!isFinite(range) || range === 0) {
+        range = Math.max(0.5, Math.abs(maxVal) * 0.2);
       }
+      var pad = range * 0.1;
+      chart.options.scales.y.min = minVal - pad;
+      chart.options.scales.y.max = maxVal + pad;
+    } else {
+      delete chart.options.scales.y.min;
+      delete chart.options.scales.y.max;
     }
     chart.update('none');
   }
 
   function applyWaveformRange() {
     if (!state.waveformChart) return;
-    var min = parseFloat(els.accelMin.value);
-    var max = parseFloat(els.accelMax.value);
+    var min = parseFloat(els.timeMin.value);
+    var max = parseFloat(els.timeMax.value);
     if (!isFinite(min)) min = null;
     if (!isFinite(max)) max = null;
+    if (min !== null) min = Math.max(0, min);
+    if (max !== null) max = Math.max(0, max);
     if (min !== null && max !== null && min > max) {
       var swap = min;
       min = max;
@@ -913,21 +902,29 @@ var App = (function () {
     }
     var chart = state.waveformChart;
     if (min === null) {
-      delete chart.options.scales.y.min;
+      delete chart.options.scales.x.min;
     } else {
-      chart.options.scales.y.min = min;
+      chart.options.scales.x.min = min;
     }
     if (max === null) {
-      delete chart.options.scales.y.max;
+      delete chart.options.scales.x.max;
     } else {
-      chart.options.scales.y.max = max;
+      chart.options.scales.x.max = max;
     }
-    chart.update('none');
+    if (state.analysisResult && state.analysisResult.dynamic) {
+      updateWaveformChart(state.analysisResult.dynamic);
+    } else if (state.rawData.length > 0) {
+      var recent = state.rawData.slice(-200);
+      var dynamic = Analysis.removeGravity(recent);
+      updateWaveformChart(dynamic);
+    } else {
+      chart.update('none');
+    }
   }
 
   function resetWaveformRange() {
-    els.accelMin.value = '';
-    els.accelMax.value = '';
+    els.timeMin.value = '';
+    els.timeMax.value = '';
     applyWaveformRange();
   }
 
