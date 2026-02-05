@@ -175,8 +175,26 @@
       <canvas id="spectrumChart"></canvas>
     </div>
     <div class="spectrum-note" id="spectrumNote" style="display:none">
-      <span data-lang="ja">スペクトルは重力除去後の動的加速度から算出します。下の成分で切替できます。</span>
-      <span data-lang="en">Spectrum is computed from dynamic acceleration (gravity removed). Select components below.</span>
+      <span data-lang="ja">スペクトルは重力除去後の動的加速度から算出します。FFT/1/3オクターブを切替できます。</span>
+      <span data-lang="en">Spectrum is computed from dynamic acceleration (gravity removed). Toggle FFT / 1/3 octave.</span>
+    </div>
+    <div class="spectrum-mode" id="spectrumMode" style="display:none">
+      <div class="components-label">
+        <span data-lang="ja">表示</span>
+        <span data-lang="en">Display</span>:
+      </div>
+      <div class="components-options">
+        <label class="check-pill">
+          <input type="radio" name="specMode" id="specModeFft" value="fft" checked>
+          <span data-lang="ja">FFT</span>
+          <span data-lang="en">FFT</span>
+        </label>
+        <label class="check-pill">
+          <input type="radio" name="specMode" id="specModeOct" value="octave">
+          <span data-lang="ja">1/3オクターブ</span>
+          <span data-lang="en">1/3 Octave</span>
+        </label>
+      </div>
     </div>
     <div class="spectrum-range" id="spectrumRange" style="display:none">
       <label class="range-label">

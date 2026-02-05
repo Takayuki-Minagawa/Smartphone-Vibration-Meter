@@ -15,6 +15,7 @@ var App = (function () {
     currentTab: 'waveform',
     sensorAvailable: false,
     spectrumSelection: { x: true, y: true, z: true, mag: true },
+    spectrumMode: 'fft',
     zoom: { active: false, wrap: null, parent: null, next: null, controls: [] },
     chartTheme: null,
     statusKey: 'statusInit',
@@ -134,6 +135,7 @@ var App = (function () {
     setupCharts();
     bindEvents();
     readSpectrumSelection();
+    readSpectrumMode();
     updateUI();
 
     // Show profile info / viewer mode message
@@ -175,6 +177,7 @@ var App = (function () {
     els.durationSelect = document.getElementById('durationSelect');
     els.spectrumRange = document.getElementById('spectrumRange');
     els.spectrumNote = document.getElementById('spectrumNote');
+    els.spectrumMode = document.getElementById('spectrumMode');
     els.spectrumComponents = document.getElementById('spectrumComponents');
     els.freqMin = document.getElementById('freqMin');
     els.freqMax = document.getElementById('freqMax');
@@ -186,6 +189,8 @@ var App = (function () {
     els.specY = document.getElementById('specY');
     els.specZ = document.getElementById('specZ');
     els.specMag = document.getElementById('specMag');
+    els.specModeFft = document.getElementById('specModeFft');
+    els.specModeOct = document.getElementById('specModeOct');
     els.btnSpecAll = document.getElementById('btnSpecAll');
     els.btnSpecMag = document.getElementById('btnSpecMag');
     els.btnLangToggle = document.getElementById('btnLangToggle');
@@ -518,8 +523,8 @@ var App = (function () {
       spec.update('none');
     }
 
-    if (state.analysisResult && state.analysisResult.spectrum) {
-      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    if (state.analysisResult) {
+      updateSpectrumChart(state.analysisResult);
     }
   }
 
@@ -544,6 +549,8 @@ var App = (function () {
     els.specY.addEventListener('change', handleSpectrumComponentChange);
     els.specZ.addEventListener('change', handleSpectrumComponentChange);
     els.specMag.addEventListener('change', handleSpectrumComponentChange);
+    if (els.specModeFft) els.specModeFft.addEventListener('change', handleSpectrumModeChange);
+    if (els.specModeOct) els.specModeOct.addEventListener('change', handleSpectrumModeChange);
     els.btnSpecAll.addEventListener('click', selectAllSpectrumComponents);
     els.btnSpecMag.addEventListener('click', selectMagOnly);
     els.btnLangToggle.addEventListener('click', function () {
@@ -639,6 +646,7 @@ var App = (function () {
     els.zoomChartHost.appendChild(wrap);
     if (state.currentTab === 'spectrum') {
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumNote));
+      state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumMode));
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumRange));
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumComponents));
     } else if (state.currentTab === 'waveform') {
@@ -682,6 +690,20 @@ var App = (function () {
     }, 0);
   }
 
+  function readSpectrumMode() {
+    var mode = 'fft';
+    if (els.specModeOct && els.specModeOct.checked) mode = 'octave';
+    state.spectrumMode = mode;
+    return mode;
+  }
+
+  function handleSpectrumModeChange() {
+    readSpectrumMode();
+    if (state.analysisResult) {
+      updateSpectrumChart(state.analysisResult);
+    }
+  }
+
   function readSpectrumSelection() {
     var selection = {
       x: !!els.specX.checked,
@@ -700,8 +722,8 @@ var App = (function () {
 
   function handleSpectrumComponentChange() {
     readSpectrumSelection();
-    if (state.analysisResult && state.analysisResult.spectrum) {
-      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    if (state.analysisResult) {
+      updateSpectrumChart(state.analysisResult);
     }
   }
 
@@ -789,8 +811,8 @@ var App = (function () {
       ? (state.rawData[state.rawData.length - 1].t - state.rawData[0].t) / 1000
       : 0;
 
-    els.kpiRms.textContent = rms.toFixed(3);
-    els.kpiPeak.textContent = peak.toFixed(3);
+    els.kpiRms.textContent = rms.toFixed(2);
+    els.kpiPeak.textContent = peak.toFixed(2);
     els.kpiFsHz.textContent = fs.toFixed(0);
     els.kpiDuration.textContent = durationS.toFixed(1);
     els.kpiSamples.textContent = state.rawData.length;
@@ -803,8 +825,8 @@ var App = (function () {
   }
 
   function updateKPI(result) {
-    els.kpiRms.textContent = result.rms.toFixed(4);
-    els.kpiPeak.textContent = result.peak.toFixed(4);
+    els.kpiRms.textContent = result.rms.toFixed(2);
+    els.kpiPeak.textContent = result.peak.toFixed(2);
     els.kpiFsHz.textContent = result.fsHz.toFixed(1);
     els.kpiFpeak.textContent = result.fPeak > 0 ? result.fPeak.toFixed(1) : '-';
     els.kpiDuration.textContent = (result.durationMs / 1000).toFixed(1);
@@ -813,7 +835,7 @@ var App = (function () {
 
   function updateCharts(result) {
     updateWaveformChart(result.dynamic);
-    updateSpectrumChart(result.spectrum, result.fsHz);
+    updateSpectrumChart(result);
   }
 
   function updateWaveformChart(dynamic) {
@@ -922,7 +944,13 @@ var App = (function () {
     applyWaveformRange();
   }
 
-  function updateSpectrumChart(spectrum, fs) {
+  function updateSpectrumChart(result) {
+    var fs = result ? result.fsHz : 0;
+    var spectrum = null;
+    if (result) {
+      spectrum = state.spectrumMode === 'octave' ? result.spectrumThird : result.spectrum;
+    }
+
     if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
       var emptyChart = state.spectrumChart;
       emptyChart.data.labels = [];
@@ -932,11 +960,20 @@ var App = (function () {
     }
 
     var theme = state.chartTheme || getChartTheme();
-    var maxFreq = fs / 2;
+    var maxFreq = fs > 0 ? fs / 2 : spectrum.mag.freqs[spectrum.mag.freqs.length - 1];
     var labels = [];
     var maxPower = 0;
     var freqs = spectrum.mag.freqs;
     var indices = [];
+    var startIndex = state.spectrumMode === 'octave' ? 0 : 1;
+
+    function formatSpectrumLabel(freq) {
+      if (state.spectrumMode !== 'octave') return freq.toFixed(1);
+      if (freq >= 100) return freq.toFixed(0);
+      if (freq >= 10) return freq.toFixed(1);
+      if (freq >= 1) return freq.toFixed(2);
+      return freq.toFixed(3);
+    }
 
     // User-specified frequency range for display + Y-axis fitting
     var fitMin = parseFloat(els.freqMin.value);
@@ -951,12 +988,12 @@ var App = (function () {
       fitMax = swap;
     }
 
-    // Start from i=1 to skip DC component (i=0) which dominates the scale
-    for (var i = 1; i < freqs.length; i++) {
+    // Skip DC component for FFT (i=0), keep all for 1/3 octave
+    for (var i = startIndex; i < freqs.length; i++) {
       var freq = freqs[i];
       if (freq < fitMin) continue;
       if (freq > fitMax) break;
-      labels.push(freq.toFixed(1));
+      labels.push(formatSpectrumLabel(freq));
       indices.push(i);
     }
 
@@ -1008,8 +1045,8 @@ var App = (function () {
   }
 
   function applyFreqRange() {
-    if (state.analysisResult && state.analysisResult.spectrum) {
-      updateSpectrumChart(state.analysisResult.spectrum, state.analysisResult.fsHz);
+    if (state.analysisResult) {
+      updateSpectrumChart(state.analysisResult);
     }
   }
 
@@ -1028,6 +1065,7 @@ var App = (function () {
     els.waveformRange.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumNote.style.display = tab === 'spectrum' ? 'block' : 'none';
+    els.spectrumMode.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumRange.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumComponents.style.display = tab === 'spectrum' ? 'grid' : 'none';
 

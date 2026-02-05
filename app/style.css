@@ -384,6 +384,12 @@ body {
   margin-bottom: 4px;
 }
 
+.spectrum-mode {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 /* Range controls */
 .spectrum-range,
 .waveform-range {

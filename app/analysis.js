@@ -184,19 +184,97 @@ const Analysis = (function () {
     var power = new Float64Array(halfN);
     var maxPower = 0;
     var fPeak = 0;
+    var minPeakHz = 0.5;
 
     for (var i = 0; i < halfN; i++) {
       freqs[i] = i * fs / n;
       power[i] = (re[i] * re[i] + im[i] * im[i]) / n;
 
       // Skip DC component (i=0) for peak detection
-      if (i > 0 && power[i] > maxPower) {
+      if (i > 0 && freqs[i] >= minPeakHz && power[i] > maxPower) {
         maxPower = power[i];
         fPeak = freqs[i];
       }
     }
 
     return { freqs: freqs, power: power, fPeak: fPeak };
+  }
+
+  /**
+   * Compute 1/3 octave spectrum from power spectrum
+   * @param {Float64Array} freqs
+   * @param {Float64Array} power
+   * @param {number} minHz
+   * @param {number} maxHz
+   * @returns {{freqs: Float64Array, power: Float64Array}}
+   */
+  function computeThirdOctaveFromPower(freqs, power, minHz, maxHz) {
+    if (!freqs || freqs.length === 0 || !power || power.length === 0) {
+      return { freqs: new Float64Array(0), power: new Float64Array(0) };
+    }
+
+    var ratio = Math.pow(2, 1 / 3);
+    var edgeFactor = Math.pow(2, 1 / 6);
+    var min = isFinite(minHz) ? Math.max(0, minHz) : 0;
+    var max = isFinite(maxHz) ? maxHz : freqs[freqs.length - 1];
+
+    if (max <= 0) {
+      return { freqs: new Float64Array(0), power: new Float64Array(0) };
+    }
+
+    if (min <= 0) {
+      min = freqs.length > 1 ? freqs[1] : 0;
+    }
+
+    var fc = 1;
+    while (fc >= min * ratio) fc /= ratio;
+    while (fc < min) fc *= ratio;
+
+    var centers = [];
+    var bands = [];
+    var i = 1; // skip DC
+
+    while (fc <= max) {
+      var lower = fc / edgeFactor;
+      var upper = fc * edgeFactor;
+      while (i < freqs.length && freqs[i] < lower) i++;
+      var sum = 0;
+      var j = i;
+      while (j < freqs.length && freqs[j] < upper) {
+        sum += power[j];
+        j++;
+      }
+      i = j;
+      centers.push(fc);
+      bands.push(sum);
+      fc *= ratio;
+    }
+
+    return {
+      freqs: new Float64Array(centers),
+      power: new Float64Array(bands)
+    };
+  }
+
+  /**
+   * Compute 1/3 octave spectrum for each component
+   * @param {Object} spectrum
+   * @param {number} fs
+   * @returns {{mag: Object, x: Object, y: Object, z: Object}}
+   */
+  function computeThirdOctaveSpectrum(spectrum, fs) {
+    if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
+      var empty = { freqs: new Float64Array(0), power: new Float64Array(0) };
+      return { mag: empty, x: empty, y: empty, z: empty };
+    }
+    var maxHz = fs > 0 ? fs / 2 : spectrum.mag.freqs[spectrum.mag.freqs.length - 1];
+    var minHz = 0.5;
+    return {
+      mag: computeThirdOctaveFromPower(spectrum.mag.freqs, spectrum.mag.power, minHz, maxHz),
+      x: computeThirdOctaveFromPower(spectrum.x.freqs, spectrum.x.power, minHz, maxHz),
+      y: computeThirdOctaveFromPower(spectrum.y.freqs, spectrum.y.power, minHz, maxHz),
+      z: computeThirdOctaveFromPower(spectrum.z.freqs, spectrum.z.power, minHz, maxHz)
+    };
   }
 
   /**
@@ -227,6 +305,7 @@ const Analysis = (function () {
 
     var empty = { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
     var spectrum = { mag: empty, x: empty, y: empty, z: empty };
+    var spectrumThird = { mag: empty, x: empty, y: empty, z: empty };
     if (fs >= 10 && dynamic.length >= 16) {
       var magSeries = new Array(dynamic.length);
       var xSeries = new Array(dynamic.length);
@@ -245,6 +324,7 @@ const Analysis = (function () {
         y: computeSpectrumSeries(ySeries, fs),
         z: computeSpectrumSeries(zSeries, fs)
       };
+      spectrumThird = computeThirdOctaveSpectrum(spectrum, fs);
     }
 
     return {
@@ -255,6 +335,7 @@ const Analysis = (function () {
       fPeak: spectrum.mag.fPeak,
       dynamic: dynamic,
       spectrum: spectrum,
+      spectrumThird: spectrumThird,
       sampleCount: rawData.length,
       durationMs: rawData.length > 1 ? rawData[rawData.length - 1].t - rawData[0].t : 0
     };
@@ -268,6 +349,8 @@ const Analysis = (function () {
     estimateFs: estimateFs,
     computeSpectrum: computeSpectrum,
     computeSpectrumSeries: computeSpectrumSeries,
+    computeThirdOctaveFromPower: computeThirdOctaveFromPower,
+    computeThirdOctaveSpectrum: computeThirdOctaveSpectrum,
     analyze: analyze
   };
 })();
