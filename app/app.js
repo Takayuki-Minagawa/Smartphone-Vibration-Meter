@@ -160,6 +160,7 @@ var App = (function () {
     els.waveformCanvas = document.getElementById('waveformChart');
     els.spectrumCanvas = document.getElementById('spectrumChart');
     els.waveformWrap = document.getElementById('waveformWrap');
+    els.waveformRange = document.getElementById('waveformRange');
     els.spectrumWrap = document.getElementById('spectrumWrap');
     els.tabWaveform = document.getElementById('tabWaveform');
     els.tabSpectrum = document.getElementById('tabSpectrum');
@@ -179,6 +180,9 @@ var App = (function () {
     els.freqMin = document.getElementById('freqMin');
     els.freqMax = document.getElementById('freqMax');
     els.btnFreqReset = document.getElementById('btnFreqReset');
+    els.accelMin = document.getElementById('accelMin');
+    els.accelMax = document.getElementById('accelMax');
+    els.btnAccelReset = document.getElementById('btnAccelReset');
     els.specX = document.getElementById('specX');
     els.specY = document.getElementById('specY');
     els.specZ = document.getElementById('specZ');
@@ -260,6 +264,8 @@ var App = (function () {
   function updatePlaceholders() {
     if (els.freqMin) els.freqMin.placeholder = t('placeholderMin');
     if (els.freqMax) els.freqMax.placeholder = t('placeholderMax');
+    if (els.accelMin) els.accelMin.placeholder = t('placeholderMin');
+    if (els.accelMax) els.accelMax.placeholder = t('placeholderMax');
   }
 
   function setStatus(key, params) {
@@ -532,6 +538,9 @@ var App = (function () {
     els.freqMin.addEventListener('input', applyFreqRange);
     els.freqMax.addEventListener('input', applyFreqRange);
     els.btnFreqReset.addEventListener('click', resetFreqRange);
+    els.accelMin.addEventListener('input', applyWaveformRange);
+    els.accelMax.addEventListener('input', applyWaveformRange);
+    els.btnAccelReset.addEventListener('click', resetWaveformRange);
     els.specX.addEventListener('change', handleSpectrumComponentChange);
     els.specY.addEventListener('change', handleSpectrumComponentChange);
     els.specZ.addEventListener('change', handleSpectrumComponentChange);
@@ -633,6 +642,8 @@ var App = (function () {
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumNote));
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumRange));
       state.zoom.controls.push(moveNodeTo(els.zoomControls, els.spectrumComponents));
+    } else if (state.currentTab === 'waveform') {
+      state.zoom.controls.push(moveNodeTo(els.zoomControls, els.waveformRange));
     }
     wrap.classList.add('zoom-target');
     els.zoomOverlay.classList.add('is-open');
@@ -833,6 +844,37 @@ var App = (function () {
     chart.update('none');
   }
 
+  function applyWaveformRange() {
+    if (!state.waveformChart) return;
+    var min = parseFloat(els.accelMin.value);
+    var max = parseFloat(els.accelMax.value);
+    if (!isFinite(min)) min = null;
+    if (!isFinite(max)) max = null;
+    if (min !== null && max !== null && min > max) {
+      var swap = min;
+      min = max;
+      max = swap;
+    }
+    var chart = state.waveformChart;
+    if (min === null) {
+      delete chart.options.scales.y.min;
+    } else {
+      chart.options.scales.y.min = min;
+    }
+    if (max === null) {
+      delete chart.options.scales.y.max;
+    } else {
+      chart.options.scales.y.max = max;
+    }
+    chart.update('none');
+  }
+
+  function resetWaveformRange() {
+    els.accelMin.value = '';
+    els.accelMax.value = '';
+    applyWaveformRange();
+  }
+
   function updateSpectrumChart(spectrum, fs) {
     if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
       var emptyChart = state.spectrumChart;
@@ -936,6 +978,7 @@ var App = (function () {
     els.tabWaveform.classList.toggle('active', tab === 'waveform');
     els.tabSpectrum.classList.toggle('active', tab === 'spectrum');
     els.waveformWrap.style.display = tab === 'waveform' ? 'block' : 'none';
+    els.waveformRange.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumNote.style.display = tab === 'spectrum' ? 'block' : 'none';
     els.spectrumRange.style.display = tab === 'spectrum' ? 'block' : 'none';

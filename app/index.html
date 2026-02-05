@@ -156,6 +156,21 @@
     <div class="chart-wrap" id="waveformWrap">
       <canvas id="waveformChart"></canvas>
     </div>
+    <div class="waveform-range" id="waveformRange">
+      <label class="range-label">
+        <span data-lang="ja">加速度範囲 (cm/s²)</span>
+        <span data-lang="en">Accel range (cm/s²)</span>:
+      </label>
+      <div class="range-inputs">
+        <input type="number" id="accelMin" placeholder="最小" step="any">
+        <span class="range-sep">&ndash;</span>
+        <input type="number" id="accelMax" placeholder="最大" step="any">
+        <button class="btn btn-sm btn-secondary" id="btnAccelReset">
+          <span data-lang="ja">リセット</span>
+          <span data-lang="en">Reset</span>
+        </button>
+      </div>
+    </div>
     <div class="chart-wrap" id="spectrumWrap" style="display:none">
       <canvas id="spectrumChart"></canvas>
     </div>
@@ -274,9 +289,9 @@
       </div>
       <div class="manual-block">
         <div class="manual-title" data-lang="ja">波形 / スペクトル</div>
-        <div class="manual-text" data-lang="ja">スペクトルは重力除去後の加速度成分（X/Y/Z/|mag|）の周波数分布です。成分は下のチェックで切替できます。</div>
+        <div class="manual-text" data-lang="ja">スペクトルは重力除去後の加速度成分（X/Y/Z/|mag|）の周波数分布です。成分は下のチェックで切替できます。波形は加速度範囲、スペクトルは周波数範囲を指定できます。</div>
         <div class="manual-title" data-lang="en">Waveform / Spectrum</div>
-        <div class="manual-text" data-lang="en">Spectrum shows dynamic acceleration components (X/Y/Z/|mag|) after gravity removal. Use the checkboxes to select components.</div>
+        <div class="manual-text" data-lang="en">Spectrum shows dynamic acceleration components (X/Y/Z/|mag|) after gravity removal. Use the checkboxes to select components. You can set accel range for waveform and frequency range for spectrum.</div>
       </div>
       <div class="manual-block">
         <div class="manual-title" data-lang="ja">拡大表示</div>
