@@ -14,7 +14,7 @@ GitHub Pages（HTTPS）でホスティングする静的サイト（HTML / CSS /
 ## 主な機能
 
 - **センサー自動診断** — HTTPS 判定・権限要求・プローブを経て Capability プロファイルを生成
-- **リアルタイム計測** — 加速度（x / y / z）を時刻付きで記録し、KPI をライブ更新
+- **リアルタイム計測** — 加速度（x / y / z）を時刻付きで記録し、KPI をライブ更新（単位: cm/s&sup2;）
 - **分析** — 重力除去（ローパスフィルタ）・RMS / Peak / 卓越周波数（FFT）
 - **グラフ表示** — 時間波形とパワースペクトルをタブ切替で表示
 - **エクスポート** — CSV / JSON / ZIP ダウンロード、Web Share API による共有
@@ -116,10 +116,15 @@ GitHub Actions で `main` ブランチへの push 時に自動デプロイされ
 
 | ファイル | 内容 |
 | -------- | ---- |
-| `vibration_raw_*.csv` | 時刻・ax・ay・az・動的加速度マグニチュード |
-| `vibration_analysis_*.json` | RMS・Peak・卓越周波数・デバイスプロファイル |
+| `vibration_raw_*.csv` | 時刻・ax・ay・az・動的加速度マグニチュード（単位: cm/s&sup2;） |
+| `vibration_analysis_*.json` | RMS・Peak・卓越周波数・デバイスプロファイル・加速度単位（`accelUnit`） |
 | `vibration_package_*.json` | 生データ＋分析結果の統合ファイル（インポート用） |
 | `vibration_export_*.zip` | 上記すべてをまとめた ZIP |
+
+### 単位について
+
+- 画面表示・エクスポートは **cm/s&sup2;** を採用しています。
+- 旧形式のパッケージ（`accelUnit` 未記載）は **m/s&sup2;** とみなして読み込み時に自動換算します。
 
 ---
 

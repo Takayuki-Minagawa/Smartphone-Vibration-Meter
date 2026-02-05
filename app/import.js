@@ -14,13 +14,16 @@ var Import = (function () {
       throw new Error('Invalid file: not a vibration-meter-package');
     }
 
+    var accelUnit = pkg.accelUnit || (pkg.analysis && pkg.analysis.accelUnit) || 'm/s^2';
+    var scale = accelUnit === 'cm/s^2' ? 1 : 100;
+
     // Reconstruct rawData with relative timestamps
     var rawData = (pkg.rawData || []).map(function (r) {
       return {
         t: r.t,
-        ax: r.ax,
-        ay: r.ay,
-        az: r.az,
+        ax: r.ax * scale,
+        ay: r.ay * scale,
+        az: r.az * scale,
         hasGravity: r.hasGravity !== false
       };
     });

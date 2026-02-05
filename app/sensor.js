@@ -25,6 +25,7 @@ const Sensor = (function () {
    */
   function startListening(callback) {
     const useAccG = profile && profile.hasAccG;
+    const scale = 100; // m/s^2 -> cm/s^2
 
     function handler(e) {
       const now = performance.now();
@@ -42,7 +43,9 @@ const Sensor = (function () {
 
       callback({
         t: now,
-        ax, ay, az,
+        ax: ax * scale,
+        ay: ay * scale,
+        az: az * scale,
         hasGravity: useAccG
       });
     }

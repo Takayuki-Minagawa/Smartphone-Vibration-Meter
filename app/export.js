@@ -6,7 +6,7 @@ var Export = (function () {
    * Generate CSV string from raw data
    */
   function generateCSV(rawData, dynamicData) {
-    var lines = ['timestamp_ms,ax,ay,az,mag_dynamic'];
+    var lines = ['timestamp_ms,ax_cm_s2,ay_cm_s2,az_cm_s2,mag_dynamic_cm_s2'];
     var t0 = rawData.length > 0 ? rawData[0].t : 0;
 
     for (var i = 0; i < rawData.length; i++) {
@@ -31,8 +31,10 @@ var Export = (function () {
     return JSON.stringify({
       version: '1.0',
       exportedAt: new Date().toISOString(),
+      accelUnit: 'cm/s^2',
       deviceProfile: profile || null,
       analysis: {
+        accelUnit: 'cm/s^2',
         fsHz: analysisResult.fsHz,
         rms: analysisResult.rms,
         peak: analysisResult.peak,
@@ -64,8 +66,10 @@ var Export = (function () {
       version: '1.0',
       type: 'vibration-meter-package',
       exportedAt: new Date().toISOString(),
+      accelUnit: 'cm/s^2',
       deviceProfile: profile || null,
       analysis: {
+        accelUnit: 'cm/s^2',
         fsHz: analysisResult.fsHz,
         rms: analysisResult.rms,
         peak: analysisResult.peak,
