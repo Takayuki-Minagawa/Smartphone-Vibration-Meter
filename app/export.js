@@ -2,6 +2,105 @@
  * export.js - CSV/JSON/ZIP download and Web Share API
  */
 var Export = (function () {
+  var FORMAT_VERSION = '2.0';
+  var ACCEL_UNIT = 'cm/s^2';
+
+  /**
+   * Copy only JSON-serializable data. Unsupported values and cyclic links are
+   * omitted; typed arrays are represented as ordinary arrays.
+   */
+  function toSerializable(value, seen) {
+    if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+      return value;
+    }
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (value === undefined || typeof value === 'function' ||
+        typeof value === 'symbol' || typeof value === 'bigint') {
+      return undefined;
+    }
+    if (typeof value !== 'object') return undefined;
+
+    var ancestors = seen || [];
+    if (ancestors.indexOf(value) !== -1) return undefined;
+    ancestors.push(value);
+
+    var output;
+    if (typeof ArrayBuffer !== 'undefined' && ArrayBuffer.isView && ArrayBuffer.isView(value)) {
+      output = [];
+      for (var i = 0; i < value.length; i++) {
+        var typedValue = toSerializable(value[i], ancestors);
+        output.push(typedValue === undefined ? null : typedValue);
+      }
+    } else if (Array.isArray(value)) {
+      output = [];
+      for (var j = 0; j < value.length; j++) {
+        var arrayValue = toSerializable(value[j], ancestors);
+        output.push(arrayValue === undefined ? null : arrayValue);
+      }
+    } else {
+      output = {};
+      Object.keys(value).forEach(function (key) {
+        var objectValue = toSerializable(value[key], ancestors);
+        if (objectValue !== undefined) output[key] = objectValue;
+      });
+    }
+
+    ancestors.pop();
+    return output;
+  }
+
+  function serializableOrNull(value) {
+    var serialized = toSerializable(value, []);
+    return serialized === undefined ? null : serialized;
+  }
+
+  /** Build the compact, JSON-safe analysis section shared by all exports. */
+  function buildAnalysisSummary(analysisResult) {
+    var result = analysisResult || {};
+    return {
+      accelUnit: ACCEL_UNIT,
+      fsHz: result.fsHz,
+      rms: result.rms,
+      peak: result.peak,
+      magnitudeRange: result.magnitudeRange === undefined
+        ? result.peakToPeak
+        : result.magnitudeRange,
+      axisPeakToPeak: serializableOrNull(result.axisPeakToPeak),
+      fPeak: result.fPeak,
+      dominantAxis: serializableOrNull(result.dominantAxis),
+      sampling: serializableOrNull(result.sampling),
+      sampleCount: result.sampleCount,
+      durationMs: result.durationMs
+    };
+  }
+
+  /** Build common export metadata without reading clocks or browser globals. */
+  function buildExportPayload(analysisResult, profile, exportedAt) {
+    return {
+      version: FORMAT_VERSION,
+      processingVersion: FORMAT_VERSION,
+      exportedAt: exportedAt,
+      accelUnit: ACCEL_UNIT,
+      deviceProfile: serializableOrNull(profile),
+      analysis: buildAnalysisSummary(analysisResult)
+    };
+  }
+
+  function buildRawArray(rawData) {
+    var t0 = rawData.length > 0 ? rawData[0].t : 0;
+    return rawData.map(function (r) {
+      return {
+        t: r.t - t0,
+        ax: parseFloat(r.ax.toFixed(6)),
+        ay: parseFloat(r.ay.toFixed(6)),
+        az: parseFloat(r.az.toFixed(6)),
+        hasGravity: typeof r.hasGravity === 'boolean' ? r.hasGravity : true
+      };
+    });
+  }
+
   /**
    * Generate CSV string from raw data
    */
@@ -28,58 +127,26 @@ var Export = (function () {
    * Generate analysis JSON
    */
   function generateAnalysisJSON(analysisResult, profile) {
-    return JSON.stringify({
-      version: '1.0',
-      exportedAt: new Date().toISOString(),
-      accelUnit: 'cm/s^2',
-      deviceProfile: profile || null,
-      analysis: {
-        accelUnit: 'cm/s^2',
-        fsHz: analysisResult.fsHz,
-        rms: analysisResult.rms,
-        peak: analysisResult.peak,
-        peakToPeak: analysisResult.peakToPeak,
-        fPeak: analysisResult.fPeak,
-        sampleCount: analysisResult.sampleCount,
-        durationMs: analysisResult.durationMs
-      }
-    }, null, 2);
+    var payload = buildExportPayload(
+      analysisResult,
+      profile,
+      new Date().toISOString()
+    );
+    return JSON.stringify(payload, null, 2);
   }
 
   /**
    * Generate package JSON (combined raw + analysis for import)
    */
   function generatePackageJSON(rawData, analysisResult, profile) {
-    var t0 = rawData.length > 0 ? rawData[0].t : 0;
-
-    var rawArray = rawData.map(function (r) {
-      return {
-        t: parseFloat((r.t - t0).toFixed(2)),
-        ax: parseFloat(r.ax.toFixed(6)),
-        ay: parseFloat(r.ay.toFixed(6)),
-        az: parseFloat(r.az.toFixed(6)),
-        hasGravity: r.hasGravity
-      };
-    });
-
-    return JSON.stringify({
-      version: '1.0',
-      type: 'vibration-meter-package',
-      exportedAt: new Date().toISOString(),
-      accelUnit: 'cm/s^2',
-      deviceProfile: profile || null,
-      analysis: {
-        accelUnit: 'cm/s^2',
-        fsHz: analysisResult.fsHz,
-        rms: analysisResult.rms,
-        peak: analysisResult.peak,
-        peakToPeak: analysisResult.peakToPeak,
-        fPeak: analysisResult.fPeak,
-        sampleCount: analysisResult.sampleCount,
-        durationMs: analysisResult.durationMs
-      },
-      rawData: rawArray
-    }, null, 2);
+    var payload = buildExportPayload(
+      analysisResult,
+      profile,
+      new Date().toISOString()
+    );
+    payload.type = 'vibration-meter-package';
+    payload.rawData = buildRawArray(rawData);
+    return JSON.stringify(payload, null, 2);
   }
 
   /**
@@ -210,6 +277,14 @@ var Export = (function () {
     downloadJSON: downloadJSON,
     downloadPackage: downloadPackage,
     downloadZIP: downloadZIP,
-    generatePackageJSON: generatePackageJSON
+    generateCSV: generateCSV,
+    generateAnalysisJSON: generateAnalysisJSON,
+    generatePackageJSON: generatePackageJSON,
+    buildAnalysisSummary: buildAnalysisSummary,
+    buildExportPayload: buildExportPayload
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Export;
+}
