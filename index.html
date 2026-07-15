@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Smartphone Vibration Meter</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <style>
@@ -12,8 +12,8 @@
   --surface2: #243442;
   --accent: #00b4d8;
   --accent2: #0077b6;
-  --danger: #e63946;
-  --success: #2a9d8f;
+  --danger: #b4232f;
+  --success: #147568;
   --warn: #e9c46a;
   --text: #e8e8e8;
   --text2: #a0aab4;
@@ -120,7 +120,7 @@ h1 {
   transform: none;
 }
 .btn-primary {
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
+  background: linear-gradient(135deg, var(--accent2), var(--success));
   color: #fff;
 }
 .btn-success {
@@ -146,8 +146,8 @@ h1 {
   font-size: 0.75rem;
   flex-shrink: 0;
 }
-.check-icon.ok { background: var(--success); }
-.check-icon.ng { background: var(--danger); }
+.check-icon.ok { background: var(--success); color: #fff; }
+.check-icon.ng { background: var(--danger); color: #fff; }
 .check-icon.wait { background: var(--surface2); }
 .check-icon.warn { background: var(--warn); color: #333; }
 .result-box {
@@ -158,9 +158,9 @@ h1 {
   font-weight: 600;
   text-align: center;
 }
-.result-ok { background: rgba(42,157,143,0.2); color: var(--success); }
-.result-ng { background: rgba(230,57,70,0.2); color: var(--danger); }
-.result-warn { background: rgba(233,196,106,0.2); color: var(--warn); }
+.result-ok { background: rgba(20,117,104,0.2); color: var(--text); border: 1px solid var(--success); }
+.result-ng { background: rgba(180,35,47,0.2); color: var(--text); border: 1px solid var(--danger); }
+.result-warn { background: rgba(233,196,106,0.2); color: var(--text); border: 1px solid var(--warn); }
 #diagnostics { display: none; }
 #goApp {
   display: none;
@@ -180,11 +180,11 @@ h1 {
 </head>
 <body>
 <div class="container">
-  <h1>Vibration Meter</h1>
-  <p class="subtitle">Smartphone Vibration Measurement Tool</p>
+  <h1 lang="en">Vibration Meter</h1>
+  <p class="subtitle" lang="en">Smartphone Vibration Measurement Tool</p>
 
   <div class="card">
-    <h2>About</h2>
+    <h2>このアプリについて</h2>
     <p>
       スマートフォンの加速度センサーを使い、振動を計測・分析するWebアプリです。
       計測データはCSV/JSON/ZIPでダウンロードでき、Web Share APIによる共有も可能です。
@@ -192,7 +192,7 @@ h1 {
   </div>
 
   <div class="card">
-    <h2>Terms & Privacy</h2>
+    <h2>プライバシーと利用規約</h2>
     <p>ご利用前に利用規約とプライバシーポリシーをご確認ください。</p>
     <div class="legal-links">
       <a href="legal/terms.html">利用規約</a>
@@ -209,9 +209,9 @@ h1 {
   </button>
 
   <div class="card" id="diagnostics">
-    <h2>Sensor Diagnostics</h2>
-    <div id="checkList"></div>
-    <div id="resultBox"></div>
+    <h2>センサー診断</h2>
+    <div id="checkList" aria-live="polite"></div>
+    <div id="resultBox" role="status" aria-live="polite" aria-atomic="true"></div>
   </div>
 
   <a class="btn btn-success" id="goApp" href="app/index.html">
@@ -225,6 +225,7 @@ h1 {
 
 <script>
 (function() {
+  const CONSENT_VERSION = '2026-07';
   const consentCheck = document.getElementById('consentCheck');
   const startCheck = document.getElementById('startCheck');
   const diagnostics = document.getElementById('diagnostics');
@@ -234,7 +235,8 @@ h1 {
   const goViewer = document.getElementById('goViewer');
 
   // Restore consent from localStorage
-  if (localStorage.getItem('vibmeter_consent') === 'true') {
+  if (localStorage.getItem('vibmeter_consent') === 'true' &&
+      localStorage.getItem('vibmeter_consent_version') === CONSENT_VERSION) {
     consentCheck.checked = true;
     startCheck.disabled = false;
   }
@@ -243,16 +245,18 @@ h1 {
     startCheck.disabled = !this.checked;
     if (this.checked) {
       localStorage.setItem('vibmeter_consent', 'true');
+      localStorage.setItem('vibmeter_consent_version', CONSENT_VERSION);
     } else {
       localStorage.removeItem('vibmeter_consent');
+      localStorage.removeItem('vibmeter_consent_version');
     }
   });
 
   startCheck.addEventListener('click', async function() {
     this.disabled = true;
     diagnostics.style.display = 'block';
-    checkList.innerHTML = '';
-    resultBox.innerHTML = '';
+    checkList.replaceChildren();
+    resultBox.replaceChildren();
     goApp.style.display = 'none';
     goViewer.style.display = 'none';
 
@@ -385,16 +389,16 @@ h1 {
       let hasRotation = false;
 
       function handler(e) {
-        timestamps.push(performance.now());
+        const eventTime = Number.isFinite(e.timeStamp) ? e.timeStamp : performance.now();
+        timestamps.push(eventTime);
 
-        if (e.accelerationIncludingGravity) {
-          const g = e.accelerationIncludingGravity;
-          if (g.x !== null || g.y !== null || g.z !== null) hasAccG = true;
-        }
-        if (e.acceleration) {
-          const a = e.acceleration;
-          if (a.x !== null || a.y !== null || a.z !== null) hasAcc = true;
-        }
+        const completeVector = value => value &&
+          Number.isFinite(value.x) &&
+          Number.isFinite(value.y) &&
+          Number.isFinite(value.z);
+
+        if (completeVector(e.accelerationIncludingGravity)) hasAccG = true;
+        if (completeVector(e.acceleration)) hasAcc = true;
         if (e.rotationRate) {
           const r = e.rotationRate;
           if (r.alpha !== null || r.beta !== null || r.gamma !== null) hasRotation = true;
@@ -410,10 +414,17 @@ h1 {
         if (timestamps.length >= 2) {
           const intervals = [];
           for (let i = 1; i < timestamps.length; i++) {
-            intervals.push(timestamps[i] - timestamps[i - 1]);
+            const interval = timestamps[i] - timestamps[i - 1];
+            if (Number.isFinite(interval) && interval > 0) intervals.push(interval);
           }
-          const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-          fsHz = 1000 / avgInterval;
+          if (intervals.length > 0) {
+            intervals.sort((a, b) => a - b);
+            const mid = Math.floor(intervals.length / 2);
+            const medianInterval = intervals.length % 2
+              ? intervals[mid]
+              : (intervals[mid - 1] + intervals[mid]) / 2;
+            fsHz = medianInterval > 0 ? 1000 / medianInterval : 0;
+          }
         }
 
         resolve({
@@ -429,11 +440,12 @@ h1 {
   }
 
   function renderChecks(items) {
-    checkList.innerHTML = items.map(item => {
+    const fragment = document.createDocumentFragment();
+    items.forEach(item => {
       let iconClass = 'wait';
       let iconText = '...';
       if (item.status === 'requesting' || item.status === 'probing') {
-        iconText = '<span class="spinner"></span>';
+        iconText = '';
       } else if (item.ok === true && item.warn) {
         iconClass = 'warn';
         iconText = '!';
@@ -444,9 +456,29 @@ h1 {
         iconClass = 'ng';
         iconText = '\u2717';
       }
-      const note = item.note ? ' <span style="color:var(--text2)">(' + item.note + ')</span>' : '';
-      return '<div class="check-item"><span class="check-icon ' + iconClass + '">' + iconText + '</span><span>' + item.label + note + '</span></div>';
-    }).join('');
+      const row = document.createElement('div');
+      row.className = 'check-item';
+      const icon = document.createElement('span');
+      icon.className = 'check-icon ' + iconClass;
+      if (item.status === 'requesting' || item.status === 'probing') {
+        const spinner = document.createElement('span');
+        spinner.className = 'spinner';
+        icon.appendChild(spinner);
+      } else {
+        icon.textContent = iconText;
+      }
+      const label = document.createElement('span');
+      label.textContent = item.label;
+      if (item.note) {
+        const note = document.createElement('span');
+        note.style.color = 'var(--text2)';
+        note.textContent = ' (' + item.note + ')';
+        label.appendChild(note);
+      }
+      row.append(icon, label);
+      fragment.appendChild(row);
+    });
+    checkList.replaceChildren(fragment);
   }
 
   function showViewerMode() {
@@ -465,7 +497,10 @@ h1 {
 
   function showResult(type, message) {
     const cls = type === 'ok' ? 'result-ok' : type === 'warn' ? 'result-warn' : 'result-ng';
-    resultBox.innerHTML = '<div class="result-box ' + cls + '">' + message + '</div>';
+    const result = document.createElement('div');
+    result.className = 'result-box ' + cls;
+    result.textContent = message;
+    resultBox.replaceChildren(result);
   }
 })();
 </script>

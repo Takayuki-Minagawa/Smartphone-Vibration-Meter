@@ -12,17 +12,32 @@ var App = (function () {
     waveformChart: null,
     spectrumChart: null,
     liveUpdateTimer: null,
+    autoStopTimer: null,
+    toastTimer: null,
+    recordingSessionId: 0,
+    importRequestId: 0,
+    importing: false,
+    backgroundedDuringRecording: false,
+    datasetProfile: null,
     currentTab: 'waveform',
     sensorAvailable: false,
     spectrumSelection: { x: true, y: true, z: true, mag: true },
     spectrumMode: 'fft',
     zoom: { active: false, wrap: null, parent: null, next: null, controls: [] },
+    helpReturnFocus: null,
+    zoomReturnFocus: null,
     chartTheme: null,
     statusKey: 'statusInit',
     statusParams: null
   };
 
-  var profile = null;
+  var limits = typeof VibMeterLimits !== 'undefined'
+    ? VibMeterLimits
+    : require('./limits.js');
+  var runtimeProfile = null;
+  var MAX_RECORDING_SAMPLES = limits.maxSamples;
+  var MAX_RECORDING_DURATION_MS = limits.maxDurationMs;
+  var CONSENT_VERSION = '2026-07';
 
   // DOM refs
   var els = {};
@@ -32,30 +47,60 @@ var App = (function () {
       title: '振動計測 - 計測',
       themeLight: 'ライト',
       themeDark: 'ダーク',
+      themeToLightAria: 'ライトテーマへ切り替える',
+      themeToDarkAria: 'ダークテーマへ切り替える',
       langToEn: 'English',
       langToJa: '日本語',
+      langToggleAria: '英語表示へ切り替える',
       statusInit: '初期化中...',
       statusReady: '準備完了 | サンプリング ~{fs} Hz',
       statusViewer: '閲覧モード（インポートのみ）',
       statusRecording: '計測中...',
+      statusAnalyzing: '解析中...',
+      statusImporting: 'インポート中...',
       statusDone: '完了 | {samples} サンプル',
       statusNoData: 'データがありません',
+      statusInterrupted: '画面遷移により計測を中断しました',
+      statusSensorError: 'センサー開始に失敗しました',
+      statusAnalysisError: '解析に失敗しました',
       statusImported: 'インポート完了',
       statusImportedAt: 'インポート完了（エクスポート日時: {date}）',
       toastCsv: 'CSV を保存/共有しました',
       toastJson: 'JSON を保存/共有しました',
       toastZip: 'ZIP を保存/共有しました',
-      toastPackage: 'パッケージを保存/共有しました',
+      toastPackage: '再取込用JSONを保存/共有しました',
       toastShare: '共有しました',
       toastShareFail: '保存/共有に失敗しました: {error}',
       toastImportOk: 'インポートしました',
       toastImportFail: 'インポートに失敗しました: {error}',
+      toastImportBusy: '計測中またはインポート中は読み込めません',
+      toastSampleLimit: '安全上限 {samples} サンプルで自動停止しました',
+      toastDurationLimit: '安全上限 1 時間で自動停止しました',
+      toastImportDisplayFail: 'データは読み込みましたが表示更新に失敗しました: {error}',
+      statusImportedDisplayError: 'インポート済み（表示更新に失敗）',
       zoomWaveform: '時間波形',
       zoomSpectrum: 'スペクトル',
       axisTime: '時間 (s)',
       axisAccel: '加速度 (cm/s\u00b2)',
       axisFreq: '周波数 (Hz)',
-      axisPower: 'パワー',
+      axisPower: 'PSD ((cm/s²)²/Hz)',
+      axisBandRms: '帯域 RMS (cm/s²)',
+      qualityGood: '良好',
+      qualityFair: '注意',
+      qualityPoor: '低品質',
+      qualityInsufficient: 'データ不足',
+      qualityGoodMessage: 'サンプリング時刻は安定しています。',
+      qualityFairMessage: '周波数結果は参考値として確認してください。',
+      qualityPoorMessage: '欠損または時刻揺らぎが大きく、スペクトル解析には不向きです。',
+      qualityInsufficientMessage: '品質判定に必要なサンプルが不足しています。',
+      qualityNoSignalMessage: '全サンプルが 0 です。端末が静止しているか、センサー値が提供されていない可能性があります。',
+      qualityTimestampAdjustedMessage: ' 旧形式の同一タイムスタンプを {count} 件調整したため、スペクトルは表示しません。',
+      qualityBackgroundMessage: ' 計測中に画面がバックグラウンドになりました。',
+      fpeakMeta: 'Hz · 主成分 {axis}',
+      waveformSummary: '{duration} 秒、{samples} サンプルの X / Y / Z / |mag| 時間波形です。',
+      spectrumSummary: 'ベクトルPSDの卓越周波数 {frequency} Hz、主成分 {axis}、周波数分解能 {resolution} Hzです。',
+      spectrumUnavailableSummary: 'サンプリング品質またはデータ長が解析条件を満たさないため、スペクトルは表示しません。',
+      chartPendingSummary: '計測またはインポート後にグラフの概要を表示します。',
       durationManual: '手動',
       durationSec: '{value} 秒',
       placeholderMin: '最小',
@@ -67,30 +112,60 @@ var App = (function () {
       title: 'Vibration Meter - Measurement',
       themeLight: 'Light',
       themeDark: 'Dark',
+      themeToLightAria: 'Switch to the light theme',
+      themeToDarkAria: 'Switch to the dark theme',
       langToEn: 'English',
       langToJa: '日本語',
+      langToggleAria: 'Switch to Japanese',
       statusInit: 'Initializing...',
       statusReady: 'Ready | fs: ~{fs} Hz',
       statusViewer: 'Viewer Mode (import only)',
       statusRecording: 'Recording...',
+      statusAnalyzing: 'Analyzing...',
+      statusImporting: 'Importing...',
       statusDone: 'Done | {samples} samples',
       statusNoData: 'No data recorded',
+      statusInterrupted: 'Measurement was interrupted by page navigation',
+      statusSensorError: 'Failed to start the sensor',
+      statusAnalysisError: 'Analysis failed',
       statusImported: 'Imported',
       statusImportedAt: 'Imported (exported: {date})',
       toastCsv: 'CSV saved/shared',
       toastJson: 'JSON saved/shared',
       toastZip: 'ZIP saved/shared',
-      toastPackage: 'Package saved/shared',
+      toastPackage: 'Importable JSON saved/shared',
       toastShare: 'Shared',
       toastShareFail: 'Save/share failed: {error}',
       toastImportOk: 'Data imported successfully',
       toastImportFail: 'Import failed: {error}',
+      toastImportBusy: 'Import is unavailable while recording or importing',
+      toastSampleLimit: 'Stopped at the safety limit of {samples} samples',
+      toastDurationLimit: 'Stopped at the one-hour safety limit',
+      toastImportDisplayFail: 'Data was imported, but the display could not be refreshed: {error}',
+      statusImportedDisplayError: 'Imported (display refresh failed)',
       zoomWaveform: 'Time Waveform',
       zoomSpectrum: 'Spectrum',
       axisTime: 'Time (s)',
       axisAccel: 'Accel (cm/s\u00b2)',
       axisFreq: 'Frequency (Hz)',
-      axisPower: 'Power',
+      axisPower: 'PSD ((cm/s²)²/Hz)',
+      axisBandRms: 'Band RMS (cm/s²)',
+      qualityGood: 'Good',
+      qualityFair: 'Caution',
+      qualityPoor: 'Poor',
+      qualityInsufficient: 'Insufficient',
+      qualityGoodMessage: 'Sampling timestamps are stable.',
+      qualityFairMessage: 'Treat frequency results as approximate.',
+      qualityPoorMessage: 'Gaps or timing jitter are too large for reliable spectrum analysis.',
+      qualityInsufficientMessage: 'There are not enough samples to assess quality.',
+      qualityNoSignalMessage: 'Every sample is zero. The device may be stationary, or the browser may not be providing sensor values.',
+      qualityTimestampAdjustedMessage: ' {count} duplicate legacy timestamp(s) were adjusted, so the spectrum is hidden.',
+      qualityBackgroundMessage: ' The page was backgrounded during measurement.',
+      fpeakMeta: 'Hz · dominant {axis}',
+      waveformSummary: 'Time waveform of X / Y / Z / |mag| for {duration} s and {samples} samples.',
+      spectrumSummary: 'Vector PSD dominant frequency {frequency} Hz, dominant axis {axis}, frequency resolution {resolution} Hz.',
+      spectrumUnavailableSummary: 'The spectrum is hidden because sampling quality or record length does not meet the analysis requirements.',
+      chartPendingSummary: 'A chart summary appears after measurement or import.',
       durationManual: 'Manual',
       durationSec: '{value} sec',
       placeholderMin: 'Min',
@@ -120,27 +195,31 @@ var App = (function () {
 
   function init() {
     // Check consent
-    if (localStorage.getItem('vibmeter_consent') !== 'true') {
+    if (localStorage.getItem('vibmeter_consent') !== 'true' ||
+        localStorage.getItem('vibmeter_consent_version') !== CONSENT_VERSION) {
       window.location.href = '../index.html';
       return;
     }
 
     // Load sensor profile
-    profile = Sensor.loadProfile();
-    state.sensorAvailable = profile ? profile.sensorAvailable !== false : false;
+    runtimeProfile = Sensor.loadProfile();
+    state.sensorAvailable = !!(runtimeProfile && runtimeProfile.sensorAvailable);
+    state.datasetProfile = runtimeProfile;
 
     cacheDOMRefs();
     initTheme();
     initHelpLanguage();
     setupCharts();
     bindEvents();
+    switchTab(state.currentTab);
     readSpectrumSelection();
     readSpectrumMode();
     updateUI();
 
     // Show profile info / viewer mode message
-    if (state.sensorAvailable && profile) {
-      setStatus('statusReady', { fs: profile.fsHz.toFixed(0) });
+    if (state.sensorAvailable && runtimeProfile) {
+      var profileFs = isFinite(runtimeProfile.fsHz) ? runtimeProfile.fsHz : 0;
+      setStatus('statusReady', { fs: profileFs.toFixed(0) });
     } else {
       setStatus('statusViewer');
       els.statusDot.classList.remove('ready', 'recording');
@@ -149,6 +228,7 @@ var App = (function () {
   }
 
   function cacheDOMRefs() {
+    els.appContainer = document.querySelector('.app-container');
     els.btnStart = document.getElementById('btnStart');
     els.btnStop = document.getElementById('btnStop');
     els.statusDot = document.getElementById('statusDot');
@@ -158,9 +238,21 @@ var App = (function () {
     els.kpiFsHz = document.getElementById('kpiFsHz');
     els.kpiDuration = document.getElementById('kpiDuration');
     els.kpiFpeak = document.getElementById('kpiFpeak');
+    els.kpiFpeakMeta = document.getElementById('kpiFpeakMeta');
     els.kpiSamples = document.getElementById('kpiSamples');
+    els.qualityPanel = document.getElementById('qualityPanel');
+    els.qualityBadge = document.getElementById('qualityBadge');
+    els.qualityFs = document.getElementById('qualityFs');
+    els.qualityJitter = document.getElementById('qualityJitter');
+    els.qualityCompleteness = document.getElementById('qualityCompleteness');
+    els.qualityMaxGap = document.getElementById('qualityMaxGap');
+    els.qualityResolution = document.getElementById('qualityResolution');
+    els.qualityNyquist = document.getElementById('qualityNyquist');
+    els.qualityMessage = document.getElementById('qualityMessage');
     els.waveformCanvas = document.getElementById('waveformChart');
     els.spectrumCanvas = document.getElementById('spectrumChart');
+    els.waveformSummary = document.getElementById('waveformSummary');
+    els.spectrumSummary = document.getElementById('spectrumSummary');
     els.waveformWrap = document.getElementById('waveformWrap');
     els.waveformRange = document.getElementById('waveformRange');
     els.spectrumWrap = document.getElementById('spectrumWrap');
@@ -234,17 +326,25 @@ var App = (function () {
     refreshStatus();
     updateThemeButton(document.documentElement.getAttribute('data-theme') || 'dark');
     updateZoomTitle();
+    if (state.analysisResult) {
+      updateKPI(state.analysisResult);
+      updateQualityPanel(state.analysisResult);
+      updateChartSummaries(state.analysisResult);
+    }
   }
 
   function updateHelpLangButtons(lang) {
     if (!els.btnLangJa || !els.btnLangEn) return;
     els.btnLangJa.classList.toggle('is-active', lang === 'ja');
     els.btnLangEn.classList.toggle('is-active', lang === 'en');
+    els.btnLangJa.setAttribute('aria-pressed', lang === 'ja' ? 'true' : 'false');
+    els.btnLangEn.setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
   }
 
   function updateLangToggleButton(lang) {
     if (!els.btnLangToggle) return;
     els.btnLangToggle.textContent = lang === 'ja' ? t('langToEn') : t('langToJa');
+    els.btnLangToggle.setAttribute('aria-label', t('langToggleAria'));
   }
 
   function updateTitle() {
@@ -300,7 +400,9 @@ var App = (function () {
     }
     if (state.spectrumChart) {
       state.spectrumChart.options.scales.x.title.text = t('axisFreq');
-      state.spectrumChart.options.scales.y.title.text = t('axisPower');
+      state.spectrumChart.options.scales.y.title.text = state.spectrumMode === 'octave'
+        ? t('axisBandRms')
+        : t('axisPower');
       state.spectrumChart.update('none');
     }
   }
@@ -318,6 +420,10 @@ var App = (function () {
   function updateThemeButton(theme) {
     if (!els.btnTheme) return;
     els.btnTheme.textContent = theme === 'dark' ? t('themeLight') : t('themeDark');
+    els.btnTheme.setAttribute(
+      'aria-label',
+      t(theme === 'dark' ? 'themeToLightAria' : 'themeToDarkAria')
+    );
   }
 
   function toggleTheme() {
@@ -375,6 +481,7 @@ var App = (function () {
             data: [],
             borderColor: theme.lineX,
             borderWidth: 1,
+            borderDash: [],
             pointRadius: 0,
             tension: 0
           },
@@ -383,6 +490,7 @@ var App = (function () {
             data: [],
             borderColor: theme.lineY,
             borderWidth: 1,
+            borderDash: [8, 3],
             pointRadius: 0,
             tension: 0
           },
@@ -391,6 +499,7 @@ var App = (function () {
             data: [],
             borderColor: theme.lineZ,
             borderWidth: 1,
+            borderDash: [2, 3],
             pointRadius: 0,
             tension: 0
           },
@@ -399,6 +508,7 @@ var App = (function () {
             data: [],
             borderColor: theme.lineMag,
             borderWidth: 1.5,
+            borderDash: [10, 3, 2, 3],
             pointRadius: 0,
             tension: 0
           }
@@ -510,7 +620,7 @@ var App = (function () {
           if (ds.label === 'X') ds.borderColor = theme.lineX;
           if (ds.label === 'Y') ds.borderColor = theme.lineY;
           if (ds.label === 'Z') ds.borderColor = theme.lineZ;
-          if (ds.label === '|mag|') {
+          if (ds.label === '|mag|' || ds.label === 'Vector') {
             ds.borderColor = theme.lineMag;
             ds.backgroundColor = toRgba(theme.lineMag, 0.12);
           }
@@ -533,6 +643,8 @@ var App = (function () {
     els.btnStop.addEventListener('click', stopRecording);
     els.tabWaveform.addEventListener('click', function () { switchTab('waveform'); });
     els.tabSpectrum.addEventListener('click', function () { switchTab('spectrum'); });
+    els.tabWaveform.addEventListener('keydown', handleTabKeydown);
+    els.tabSpectrum.addEventListener('keydown', handleTabKeydown);
     els.btnZoom.addEventListener('click', openZoom);
     els.btnCsv.addEventListener('click', exportCSV);
     els.btnJson.addEventListener('click', exportJSON);
@@ -573,9 +685,18 @@ var App = (function () {
       }
     });
     document.addEventListener('keydown', function (e) {
+      var activeOverlay = state.zoom.active
+        ? els.zoomOverlay
+        : els.helpOverlay.classList.contains('is-open')
+          ? els.helpOverlay
+          : null;
+      if (e.key === 'Tab' && activeOverlay) {
+        trapDialogFocus(e, activeOverlay);
+        return;
+      }
       if (e.key === 'Escape') {
         if (state.zoom.active) closeZoom();
-        closeHelp();
+        if (els.helpOverlay.classList.contains('is-open')) closeHelp();
       }
     });
 
@@ -591,10 +712,30 @@ var App = (function () {
     wrap.addEventListener('drop', function (e) {
       e.preventDefault();
       wrap.classList.remove('dragover');
+      if (state.recording || state.importing) {
+        showToast(t('toastImportBusy'));
+        return;
+      }
       if (e.dataTransfer.files.length > 0) {
         importFile(e.dataTransfer.files[0]);
       }
     });
+
+    document.addEventListener('visibilitychange', function () {
+      if (state.recording && document.hidden) {
+        state.backgroundedDuringRecording = true;
+      }
+    });
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('pageshow', handlePageShow);
+  }
+
+  function handleTabKeydown(event) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    var nextTab = state.currentTab === 'waveform' ? 'spectrum' : 'waveform';
+    switchTab(nextTab);
+    (nextTab === 'waveform' ? els.tabWaveform : els.tabSpectrum).focus();
   }
 
   function syncOverlayState() {
@@ -602,16 +743,51 @@ var App = (function () {
     if (els.helpOverlay && els.helpOverlay.classList.contains('is-open')) open = true;
     if (els.zoomOverlay && els.zoomOverlay.classList.contains('is-open')) open = true;
     document.body.classList.toggle('overlay-open', open);
+    if (els.appContainer) els.appContainer.inert = open;
+  }
+
+  function trapDialogFocus(event, overlay) {
+    var candidates = overlay.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    );
+    var focusable = [];
+    for (var i = 0; i < candidates.length; i++) {
+      if (candidates[i].offsetParent !== null) focusable.push(candidates[i]);
+    }
+    if (!focusable.length) {
+      event.preventDefault();
+      return;
+    }
+    var first = focusable[0];
+    var last = focusable[focusable.length - 1];
+    var active = document.activeElement;
+    if (event.shiftKey && (active === first || !overlay.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !overlay.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function openHelp() {
+    if (els.helpOverlay.classList.contains('is-open')) return;
+    state.helpReturnFocus = document.activeElement;
     els.helpOverlay.classList.add('is-open');
+    els.helpOverlay.setAttribute('aria-hidden', 'false');
     syncOverlayState();
+    setTimeout(function () { els.btnHelpClose.focus(); }, 0);
   }
 
   function closeHelp() {
+    if (!els.helpOverlay.classList.contains('is-open')) return;
     els.helpOverlay.classList.remove('is-open');
+    els.helpOverlay.setAttribute('aria-hidden', 'true');
     syncOverlayState();
+    if (state.helpReturnFocus && typeof state.helpReturnFocus.focus === 'function') {
+      state.helpReturnFocus.focus();
+    }
+    state.helpReturnFocus = null;
   }
 
   function moveNodeTo(target, node) {
@@ -635,6 +811,7 @@ var App = (function () {
     var wrap = state.currentTab === 'spectrum' ? els.spectrumWrap : els.waveformWrap;
     if (!wrap) return;
     state.zoom.active = true;
+    state.zoomReturnFocus = document.activeElement;
     state.zoom.wrap = wrap;
     state.zoom.parent = wrap.parentNode;
     state.zoom.next = wrap.nextSibling;
@@ -654,9 +831,11 @@ var App = (function () {
     }
     wrap.classList.add('zoom-target');
     els.zoomOverlay.classList.add('is-open');
+    els.zoomOverlay.setAttribute('aria-hidden', 'false');
     syncOverlayState();
 
     setTimeout(function () {
+      els.btnZoomClose.focus();
       if (state.currentTab === 'waveform' && state.waveformChart) state.waveformChart.resize();
       if (state.currentTab === 'spectrum' && state.spectrumChart) state.spectrumChart.resize();
     }, 0);
@@ -677,12 +856,18 @@ var App = (function () {
       }
     }
     els.zoomOverlay.classList.remove('is-open');
+    els.zoomOverlay.setAttribute('aria-hidden', 'true');
     state.zoom.active = false;
     state.zoom.wrap = null;
     state.zoom.parent = null;
     state.zoom.next = null;
     state.zoom.controls = [];
     syncOverlayState();
+
+    if (state.zoomReturnFocus && typeof state.zoomReturnFocus.focus === 'function') {
+      state.zoomReturnFocus.focus();
+    }
+    state.zoomReturnFocus = null;
 
     setTimeout(function () {
       if (state.currentTab === 'waveform' && state.waveformChart) state.waveformChart.resize();
@@ -699,6 +884,7 @@ var App = (function () {
 
   function handleSpectrumModeChange() {
     readSpectrumMode();
+    updateChartLabels();
     if (state.analysisResult) {
       updateSpectrumChart(state.analysisResult);
     }
@@ -743,19 +929,109 @@ var App = (function () {
     handleSpectrumComponentChange();
   }
 
+  function clearAutoStopTimer() {
+    if (state.autoStopTimer) {
+      clearTimeout(state.autoStopTimer);
+      state.autoStopTimer = null;
+    }
+  }
+
+  function cleanupRecording() {
+    state.recordingSessionId += 1;
+    state.recording = false;
+    if (state.stopSensor) {
+      state.stopSensor();
+      state.stopSensor = null;
+    }
+    if (state.liveUpdateTimer) {
+      clearInterval(state.liveUpdateTimer);
+      state.liveUpdateTimer = null;
+    }
+    clearAutoStopTimer();
+  }
+
+  function handlePageHide(event) {
+    var interruptedRecording = state.recording;
+    var interruptedImport = state.importing;
+    cleanupRecording();
+    if (state.importing) {
+      state.importRequestId += 1;
+      state.importing = false;
+    }
+
+    // A page restored from the back-forward cache keeps its DOM. Synchronize it
+    // now so controls cannot remain stuck in their pre-navigation busy state.
+    if (event && event.persisted) {
+      els.statusDot.classList.remove('recording');
+      if (interruptedRecording) {
+        setStatus('statusInterrupted');
+      } else if (interruptedImport) {
+        if (state.analysisResult) {
+          setStatus('statusDone', { samples: state.analysisResult.sampleCount });
+        } else if (state.sensorAvailable && runtimeProfile) {
+          var fs = isFinite(runtimeProfile.fsHz) ? runtimeProfile.fsHz : 0;
+          setStatus('statusReady', { fs: fs.toFixed(0) });
+        } else {
+          setStatus('statusViewer');
+        }
+      }
+      updateUI();
+    }
+  }
+
+  function handlePageShow(event) {
+    if (!event || !event.persisted) return;
+    state.recording = false;
+    state.importing = false;
+    els.statusDot.classList.remove('recording');
+    updateUI();
+  }
+
   function startRecording() {
+    if (state.recording || state.importing || !state.sensorAvailable) return;
+
+    cleanupRecording();
+    state.recording = true;
+    state.backgroundedDuringRecording = false;
+    state.recordingSessionId += 1;
+    var sessionId = state.recordingSessionId;
+
+    try {
+      state.stopSensor = Sensor.startListening(function (data) {
+        if (!state.recording || state.recordingSessionId !== sessionId) return;
+        if (state.rawData.length > 0 &&
+            data.t - state.rawData[0].t > MAX_RECORDING_DURATION_MS) {
+          showToast(t('toastDurationLimit'));
+          stopRecording();
+          return;
+        }
+        state.rawData.push(data);
+        if (state.rawData.length >= MAX_RECORDING_SAMPLES) {
+          showToast(t('toastSampleLimit', { samples: MAX_RECORDING_SAMPLES }));
+          stopRecording();
+        }
+      });
+    } catch (error) {
+      cleanupRecording();
+      els.statusDot.classList.remove('recording');
+      setStatus('statusSensorError');
+      showToast(error && error.message ? error.message : String(error));
+      updateUI();
+      return;
+    }
+
+    // Only discard the previous result after sensor registration succeeds.
+    // A start-up failure must not make an earlier measurement unexportable.
     state.rawData = [];
     state.analysisResult = null;
-    state.recording = true;
+    state.datasetProfile = runtimeProfile;
+    resetQualityPanel();
+    resetChartSummaries();
     updateUI();
 
     els.statusDot.classList.remove('ready');
     els.statusDot.classList.add('recording');
     setStatus('statusRecording');
-
-    state.stopSensor = Sensor.startListening(function (data) {
-      state.rawData.push(data);
-    });
 
     // Live update timer
     state.liveUpdateTimer = setInterval(function () {
@@ -766,14 +1042,18 @@ var App = (function () {
 
     // Auto-stop by duration
     var duration = parseInt(els.durationSelect.value, 10);
-    if (duration > 0) {
-      setTimeout(function () {
-        if (state.recording) stopRecording();
-      }, duration * 1000);
-    }
+    var requestedDurationMs = duration > 0 ? duration * 1000 : MAX_RECORDING_DURATION_MS;
+    var autoStopMs = Math.min(requestedDurationMs, MAX_RECORDING_DURATION_MS);
+    var safetyDurationStop = duration <= 0 || requestedDurationMs > MAX_RECORDING_DURATION_MS;
+    state.autoStopTimer = setTimeout(function () {
+      if (!state.recording || state.recordingSessionId !== sessionId) return;
+      if (safetyDurationStop) showToast(t('toastDurationLimit'));
+      stopRecording();
+    }, autoStopMs);
   }
 
   function stopRecording() {
+    if (!state.recording) return;
     state.recording = false;
 
     if (state.stopSensor) {
@@ -785,17 +1065,33 @@ var App = (function () {
       clearInterval(state.liveUpdateTimer);
       state.liveUpdateTimer = null;
     }
+    clearAutoStopTimer();
 
     els.statusDot.classList.remove('recording');
     els.statusDot.classList.add('ready');
 
     if (state.rawData.length > 0) {
-      state.analysisResult = Analysis.analyze(state.rawData);
-      updateKPI(state.analysisResult);
-      updateCharts(state.analysisResult);
-      setStatus('statusDone', { samples: state.rawData.length });
+      setStatus('statusAnalyzing');
+      try {
+        state.analysisResult = Analysis.analyze(state.rawData);
+        if (state.analysisResult.sampling) {
+          state.analysisResult.sampling.backgrounded = state.backgroundedDuringRecording;
+          if (state.backgroundedDuringRecording && state.analysisResult.sampling.level === 'good') {
+            state.analysisResult.sampling.level = 'fair';
+          }
+        }
+        updateKPI(state.analysisResult);
+        updateCharts(state.analysisResult);
+        updateQualityPanel(state.analysisResult);
+        setStatus('statusDone', { samples: state.rawData.length });
+      } catch (error) {
+        state.analysisResult = null;
+        setStatus('statusAnalysisError');
+        showToast(error && error.message ? error.message : String(error));
+      }
     } else {
       setStatus('statusNoData');
+      resetQualityPanel();
     }
 
     updateUI();
@@ -817,6 +1113,7 @@ var App = (function () {
     els.kpiDuration.textContent = durationS.toFixed(1);
     els.kpiSamples.textContent = state.rawData.length;
     els.kpiFpeak.textContent = '-';
+    if (els.kpiFpeakMeta) els.kpiFpeakMeta.textContent = 'Hz';
 
     // Live waveform update (only when waveform tab is active)
     if (state.currentTab === 'waveform' && dynamic.length > 0) {
@@ -829,13 +1126,131 @@ var App = (function () {
     els.kpiPeak.textContent = result.peak.toFixed(2);
     els.kpiFsHz.textContent = result.fsHz.toFixed(1);
     els.kpiFpeak.textContent = result.fPeak > 0 ? result.fPeak.toFixed(1) : '-';
+    if (els.kpiFpeakMeta) {
+      els.kpiFpeakMeta.textContent = result.fPeak > 0 && result.dominantAxis
+        ? t('fpeakMeta', { axis: String(result.dominantAxis).toUpperCase() })
+        : 'Hz';
+    }
     els.kpiDuration.textContent = (result.durationMs / 1000).toFixed(1);
     els.kpiSamples.textContent = result.sampleCount;
+  }
+
+  function resetQualityPanel() {
+    if (!els.qualityPanel) return;
+    els.qualityPanel.hidden = true;
+    els.qualityPanel.classList.remove('level-good', 'level-fair', 'level-poor', 'level-insufficient');
+    if (els.qualityBadge) {
+      els.qualityBadge.textContent = '-';
+      delete els.qualityBadge.dataset.level;
+    }
+    var fields = [
+      els.qualityFs,
+      els.qualityJitter,
+      els.qualityCompleteness,
+      els.qualityMaxGap,
+      els.qualityResolution,
+      els.qualityNyquist
+    ];
+    for (var i = 0; i < fields.length; i++) {
+      if (fields[i]) fields[i].textContent = '-';
+    }
+    if (els.qualityMessage) els.qualityMessage.textContent = '';
+  }
+
+  function updateQualityPanel(result) {
+    if (!els.qualityPanel || !result || !result.sampling) return;
+    var quality = result.sampling;
+    var level = quality.level || 'insufficient';
+    var labelKey = level === 'good'
+      ? 'qualityGood'
+      : level === 'fair'
+        ? 'qualityFair'
+        : level === 'poor'
+          ? 'qualityPoor'
+          : 'qualityInsufficient';
+    var messageKey = level === 'good'
+      ? 'qualityGoodMessage'
+      : level === 'fair'
+        ? 'qualityFairMessage'
+        : level === 'poor'
+          ? 'qualityPoorMessage'
+          : 'qualityInsufficientMessage';
+
+    els.qualityPanel.hidden = false;
+    els.qualityPanel.classList.remove('level-good', 'level-fair', 'level-poor', 'level-insufficient');
+    els.qualityPanel.classList.add('level-' + level);
+    if (els.qualityBadge) {
+      els.qualityBadge.textContent = t(labelKey);
+      els.qualityBadge.dataset.level = level;
+    }
+
+    function setMetric(element, value, digits, suffix) {
+      if (!element) return;
+      element.textContent = isFinite(value) ? Number(value).toFixed(digits) + suffix : '-';
+    }
+
+    setMetric(els.qualityFs, quality.fsHz, 1, ' Hz');
+    setMetric(els.qualityJitter, quality.jitterPercent, 1, ' %');
+    if (els.qualityCompleteness) {
+      var completeness = isFinite(quality.completenessPercent)
+        ? Number(quality.completenessPercent).toFixed(1) + ' %'
+        : '-';
+      if (isFinite(quality.estimatedDropped) && quality.estimatedDropped > 0) {
+        completeness += ' / -' + Math.round(quality.estimatedDropped);
+      }
+      els.qualityCompleteness.textContent = completeness;
+    }
+    setMetric(els.qualityMaxGap, quality.maxGapMs, 1, ' ms');
+    setMetric(els.qualityResolution, quality.frequencyResolutionHz, 2, ' Hz');
+    setMetric(els.qualityNyquist, quality.nyquistHz, 1, ' Hz');
+
+    if (els.qualityMessage) {
+      var qualityMessage = quality.allZeroSignal
+        ? t('qualityNoSignalMessage')
+        : t(messageKey);
+      if (isFinite(quality.timestampAdjustedCount) && quality.timestampAdjustedCount > 0) {
+        qualityMessage += t('qualityTimestampAdjustedMessage', {
+          count: Math.round(quality.timestampAdjustedCount)
+        });
+      }
+      els.qualityMessage.textContent = qualityMessage +
+        (quality.backgrounded ? t('qualityBackgroundMessage') : '');
+    }
+  }
+
+  function resetChartSummaries() {
+    if (els.waveformSummary) els.waveformSummary.textContent = t('chartPendingSummary');
+    if (els.spectrumSummary) els.spectrumSummary.textContent = t('chartPendingSummary');
+  }
+
+  function updateChartSummaries(result) {
+    if (!result) {
+      resetChartSummaries();
+      return;
+    }
+    if (els.waveformSummary) {
+      els.waveformSummary.textContent = t('waveformSummary', {
+        duration: (result.durationMs / 1000).toFixed(1),
+        samples: result.sampleCount
+      });
+    }
+    if (els.spectrumSummary) {
+      if (result.fPeak > 0 && result.sampling && result.sampling.spectrumUsable) {
+        els.spectrumSummary.textContent = t('spectrumSummary', {
+          frequency: result.fPeak.toFixed(2),
+          axis: result.dominantAxis ? String(result.dominantAxis).toUpperCase() : '-',
+          resolution: result.sampling.frequencyResolutionHz.toFixed(2)
+        });
+      } else {
+        els.spectrumSummary.textContent = t('spectrumUnavailableSummary');
+      }
+    }
   }
 
   function updateCharts(result) {
     updateWaveformChart(result.dynamic);
     updateSpectrumChart(result);
+    updateChartSummaries(result);
   }
 
   function updateWaveformChart(dynamic) {
@@ -951,7 +1366,8 @@ var App = (function () {
       spectrum = state.spectrumMode === 'octave' ? result.spectrumThird : result.spectrum;
     }
 
-    if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
+    var primarySpectrum = spectrum && (spectrum.vector || spectrum.mag);
+    if (!primarySpectrum || !primarySpectrum.freqs || primarySpectrum.freqs.length === 0) {
       var emptyChart = state.spectrumChart;
       emptyChart.data.labels = [];
       emptyChart.data.datasets = [];
@@ -960,10 +1376,10 @@ var App = (function () {
     }
 
     var theme = state.chartTheme || getChartTheme();
-    var maxFreq = fs > 0 ? fs / 2 : spectrum.mag.freqs[spectrum.mag.freqs.length - 1];
+    var maxFreq = fs > 0 ? fs / 2 : primarySpectrum.freqs[primarySpectrum.freqs.length - 1];
     var labels = [];
     var maxPower = 0;
-    var freqs = spectrum.mag.freqs;
+    var freqs = primarySpectrum.freqs;
     var indices = [];
     var startIndex = state.spectrumMode === 'octave' ? 0 : 1;
 
@@ -1015,7 +1431,14 @@ var App = (function () {
         data: data,
         borderColor: color,
         backgroundColor: fill ? toRgba(color, 0.12) : 'transparent',
-        borderWidth: label === '|mag|' ? 1.5 : 1,
+        borderWidth: label === 'Vector' ? 1.5 : 1,
+        borderDash: key === 'y'
+          ? [8, 3]
+          : key === 'z'
+            ? [2, 3]
+            : key === 'vector' || key === 'mag'
+              ? [10, 3, 2, 3]
+              : [],
         pointRadius: 0,
         fill: !!fill,
         tension: 0.2
@@ -1025,10 +1448,10 @@ var App = (function () {
     if (selection.x) addDataset('x', 'X', theme.lineX, false);
     if (selection.y) addDataset('y', 'Y', theme.lineY, false);
     if (selection.z) addDataset('z', 'Z', theme.lineZ, false);
-    if (selection.mag) addDataset('mag', '|mag|', theme.lineMag, true);
+    if (selection.mag) addDataset(spectrum.vector ? 'vector' : 'mag', 'Vector', theme.lineMag, true);
 
     if (datasets.length === 0) {
-      addDataset('mag', '|mag|', theme.lineMag, true);
+      addDataset(spectrum.vector ? 'vector' : 'mag', 'Vector', theme.lineMag, true);
     }
 
     var chart = state.spectrumChart;
@@ -1061,6 +1484,12 @@ var App = (function () {
     state.currentTab = tab;
     els.tabWaveform.classList.toggle('active', tab === 'waveform');
     els.tabSpectrum.classList.toggle('active', tab === 'spectrum');
+    els.tabWaveform.setAttribute('aria-selected', tab === 'waveform' ? 'true' : 'false');
+    els.tabSpectrum.setAttribute('aria-selected', tab === 'spectrum' ? 'true' : 'false');
+    els.tabWaveform.tabIndex = tab === 'waveform' ? 0 : -1;
+    els.tabSpectrum.tabIndex = tab === 'spectrum' ? 0 : -1;
+    els.waveformWrap.setAttribute('aria-hidden', tab === 'waveform' ? 'false' : 'true');
+    els.spectrumWrap.setAttribute('aria-hidden', tab === 'spectrum' ? 'false' : 'true');
     els.waveformWrap.style.display = tab === 'waveform' ? 'block' : 'none';
     els.waveformRange.style.display = tab === 'waveform' ? 'block' : 'none';
     els.spectrumWrap.style.display = tab === 'spectrum' ? 'block' : 'none';
@@ -1080,17 +1509,22 @@ var App = (function () {
   function updateUI() {
     var hasData = state.analysisResult !== null;
     var canMeasure = state.sensorAvailable;
+    var busy = state.recording || state.importing;
 
     // Measurement controls: disabled entirely when sensor is unavailable
-    els.btnStart.disabled = !canMeasure || state.recording;
+    els.btnStart.disabled = !canMeasure || busy;
     els.btnStop.disabled = !canMeasure || !state.recording;
-    els.durationSelect.disabled = !canMeasure || state.recording;
+    els.durationSelect.disabled = !canMeasure || busy;
+
+    els.importInput.disabled = busy;
+    els.importWrap.classList.toggle('is-disabled', busy);
+    els.importWrap.setAttribute('aria-disabled', busy ? 'true' : 'false');
 
     // Export: available whenever data exists (measured or imported)
-    els.btnCsv.disabled = !hasData;
-    els.btnJson.disabled = !hasData;
-    els.btnZip.disabled = !hasData;
-    els.btnPackage.disabled = !hasData;
+    els.btnCsv.disabled = !hasData || busy;
+    els.btnJson.disabled = !hasData || busy;
+    els.btnZip.disabled = !hasData || busy;
+    els.btnPackage.disabled = !hasData || busy;
   }
 
   // Export handlers
@@ -1119,7 +1553,7 @@ var App = (function () {
   function exportJSON() {
     if (!state.analysisResult) return;
     handleExport(
-      Export.downloadJSON(state.analysisResult, profile),
+      Export.downloadJSON(state.analysisResult, state.datasetProfile),
       'toastJson'
     );
   }
@@ -1130,34 +1564,72 @@ var App = (function () {
       state.rawData,
       state.analysisResult.dynamic,
       state.analysisResult,
-      profile
+      state.datasetProfile
     ), 'toastZip');
   }
 
   function exportPackage() {
     if (!state.analysisResult) return;
     handleExport(
-      Export.downloadPackage(state.rawData, state.analysisResult, profile),
+      Export.downloadPackage(state.rawData, state.analysisResult, state.datasetProfile),
       'toastPackage'
     );
   }
 
   // Import handler
   function handleImport(e) {
-    if (e.target.files && e.target.files.length > 0) {
-      importFile(e.target.files[0]);
-    }
+    var file = e.target.files && e.target.files.length > 0 ? e.target.files[0] : null;
+    // Reset immediately so selecting the same file again still emits change.
+    e.target.value = '';
+    if (file) importFile(file);
   }
 
   function importFile(file) {
+    if (state.recording || state.importing) {
+      showToast(t('toastImportBusy'));
+      return;
+    }
+
+    var requestId = state.importRequestId + 1;
+    var previousStatusKey = state.statusKey;
+    var previousStatusParams = state.statusParams;
+    var committed = false;
+    state.importRequestId = requestId;
+    state.importing = true;
+    setStatus('statusImporting');
+    updateUI();
+
     Import.handleFile(file)
       .then(function (result) {
+        if (requestId !== state.importRequestId) return;
+        var importedSampling = result.analysis && result.analysis.sampling;
+        var historicalTimestampAdjustments = importedSampling &&
+          typeof importedSampling.timestampAdjustedCount === 'number' &&
+          isFinite(importedSampling.timestampAdjustedCount)
+          ? Math.max(0, Math.floor(importedSampling.timestampAdjustedCount))
+          : 0;
+        var timestampAdjustedCount = Math.max(
+          result.timestampAdjustedCount || 0,
+          historicalTimestampAdjustments
+        );
+        var nextAnalysis = Import.reanalyze(result.rawData, {
+          timestampAdjustedCount: timestampAdjustedCount
+        });
+        if (nextAnalysis.sampling && importedSampling && importedSampling.backgrounded === true) {
+          nextAnalysis.sampling.backgrounded = true;
+          if (nextAnalysis.sampling.level === 'good') nextAnalysis.sampling.level = 'fair';
+        }
+
+        // Commit the dataset only after validation and reanalysis both succeed.
+        // This keeps raw data and metrics from different files from mixing.
         state.rawData = result.rawData;
-        state.analysisResult = Import.reanalyze(result.rawData);
-        if (result.profile) profile = result.profile;
+        state.analysisResult = nextAnalysis;
+        state.datasetProfile = result.profile || null;
+        committed = true;
 
         updateKPI(state.analysisResult);
         updateCharts(state.analysisResult);
+        updateQualityPanel(state.analysisResult);
         updateUI();
 
         if (result.exportedAt) {
@@ -1171,15 +1643,33 @@ var App = (function () {
         showToast(t('toastImportOk'));
       })
       .catch(function (err) {
-        showToast(t('toastImportFail', { error: err.message }));
+        if (requestId !== state.importRequestId) return;
+        var message = err && err.message ? err.message : String(err);
+        if (committed) {
+          setStatus('statusImportedDisplayError');
+          showToast(t('toastImportDisplayFail', { error: message }));
+        } else {
+          setStatus(
+            previousStatusKey || (state.sensorAvailable ? 'statusReady' : 'statusViewer'),
+            previousStatusParams || {}
+          );
+          showToast(t('toastImportFail', { error: message }));
+        }
+      })
+      .finally(function () {
+        if (requestId !== state.importRequestId) return;
+        state.importing = false;
+        updateUI();
       });
   }
 
   function showToast(msg) {
+    if (state.toastTimer) clearTimeout(state.toastTimer);
     els.toast.textContent = msg;
     els.toast.classList.add('show');
-    setTimeout(function () {
+    state.toastTimer = setTimeout(function () {
       els.toast.classList.remove('show');
+      state.toastTimer = null;
     }, 2500);
   }
 

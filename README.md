@@ -14,9 +14,10 @@ GitHub Pages（HTTPS）でホスティングする静的サイト（HTML / CSS /
 ## 主な機能
 
 - **センサー自動診断** — HTTPS 判定・権限要求・プローブを経て Capability プロファイルを生成
-- **リアルタイム計測** — 加速度（x / y / z）を時刻付きで記録し、KPI をライブ更新（単位: cm/s&sup2;）
-- **分析** — 重力除去（ローパスフィルタ）・RMS / Peak / 卓越周波数（FFT, 0.5Hz 以上）
-- **グラフ表示** — 時間波形と FFT / 1/3 オクターブのスペクトルをタブ切替で表示
+- **リアルタイム計測** — 線形加速度を優先して x / y / z を時刻付きで記録し、KPI をライブ更新（単位: cm/s&sup2;）
+- **分析** — 時刻依存の重力除去・等間隔再サンプリング・RMS / Peak・ベクトル PSD による卓越周波数
+- **サンプリング品質** — 実測周波数・ジッター・欠損推定・最大ギャップ・周波数分解能・ナイキスト周波数を表示
+- **グラフ表示** — 時間波形と PSD / 1/3 オクターブ帯域 RMS をタブ切替で表示
 - **エクスポート** — CSV / JSON / ZIP ダウンロード、Web Share API による共有
 - **インポート** — エクスポートしたデータを読み込み、グラフと指標を復元
 - **閲覧モード** — センサー非搭載の端末（PC 等）でもインポート・グラフ表示が可能
@@ -47,11 +48,11 @@ GitHub Pages（HTTPS）でホスティングする静的サイト（HTML / CSS /
 
 | 項目 | 選定 | ライセンス |
 | ---- | ---- | --------- |
-| グラフ描画 | [Chart.js v4](https://www.chartjs.org/)（CDN） | MIT |
-| ZIP 生成 | [JSZip v3](https://stuk.github.io/jszip/)（CDN） | MIT / GPLv3 dual（MIT で利用） |
-| FFT | 自前実装（Radix-2 Cooley-Tukey + Hanning 窓） | — |
+| グラフ描画 | [Chart.js v4.5.1](https://www.chartjs.org/)（CDN・SRI検証） | MIT |
+| ZIP 生成 | [JSZip v3.10.1](https://stuk.github.io/jszip/)（CDN・SRI検証） | MIT / GPLv3 dual（MIT で利用） |
+| FFT | 自前実装（Radix-2 Cooley-Tukey + Hann 窓） | — |
 
-サーバーサイドは不要です。すべての処理はブラウザ内で完結し、外部へのデータ送信は行いません。
+サーバーサイドは不要です。計測・解析・ファイル生成はブラウザ内で完結し、計測データを外部サーバーへ送信しません。初回表示時には Chart.js / JSZip を取得するため jsDelivr CDN へ接続します。
 
 ---
 
@@ -65,6 +66,7 @@ GitHub Pages（HTTPS）でホスティングする静的サイト（HTML / CSS /
 │   ├── index.html              # 計測・分析 UI
 │   ├── style.css               # アプリ共通スタイル
 │   ├── app.js                  # メインコントローラー
+│   ├── limits.js               # 記録・取込・解析で共有する安全上限
 │   ├── sensor.js               # センサー検出・権限・Capability プロファイル
 │   ├── analysis.js             # 重力除去・RMS / Peak・FFT + 1/3 オクターブ
 │   ├── export.js               # CSV / JSON / ZIP / Web Share
@@ -74,7 +76,10 @@ GitHub Pages（HTTPS）でホスティングする静的サイト（HTML / CSS /
 │   └── privacy.html            # プライバシーポリシー
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml          # GitHub Pages デプロイ
+│       ├── deploy.yml          # テスト後の GitHub Pages デプロイ
+│       └── test.yml            # Pull Request の自動テスト
+├── tests/                      # 信号処理・取込・センサー・HTML の単体テスト
+├── package.json                # 依存なしの検査・テストコマンド
 ├── LICENSE                     # MIT License
 ├── THIRD-PARTY-NOTICES         # 依存ライブラリのライセンス表記
 └── README.md
@@ -104,10 +109,11 @@ GitHub Actions で `main` ブランチへの push 時に自動デプロイされ
 | `sensorAvailable` | センサーが利用可能か |
 | `needsPermission` | `requestPermission()` が必要か（iOS） |
 | `hasAccG` | `accelerationIncludingGravity` が取得できるか |
+| `hasAcc` | 重力除去済みの `acceleration` が取得できるか |
 | `fsHz` | 推定サンプリング周波数 |
 | `hasRotationRate` | `rotationRate` が取得できるか |
 
-- `fsHz < 25` → スペクトル表示は参考値として扱う
+- 記録長 2 秒未満、実測周波数 10 Hz 未満、分解能 0.5 Hz 超、または大きな時刻揺らぎ・欠損がある場合はスペクトルを表示しない
 - `hasAccG = false` かつ `hasAcc = false` → 計測不可（閲覧モードへ）
 
 ---
@@ -115,9 +121,12 @@ GitHub Actions で `main` ブランチへの push 時に自動デプロイされ
 ## 表示仕様
 
 - **KPI（RMS / Peak）** は `cm/s²` 表示時に小数点以下 2 桁固定。
-- **卓越周波数** は `0.5 Hz` 以上の成分から算出。
-- **スペクトル** は FFT と 1/3 オクターブの表示切替に対応。
-- **`|mag|`** は重力除去後の合成加速度で、`mag = sqrt(X^2 + Y^2 + Z^2)`（X/Y/Z は重力除去後の成分）。
+- **卓越周波数** は `0.5 Hz` 以上にある `PSD_X + PSD_Y + PSD_Z` の最大成分から算出します。`|mag|` の FFT による周波数倍化を避け、端末の向きに依存しにくい指標にしています。
+- **FFT 表示** は平均除去・Hann 窓・片側化を行った PSD で、単位は `(cm/s²)²/Hz` です。
+- **1/3 オクターブ表示** は PSD を各帯域で積分した帯域 RMS で、単位は `cm/s²` です。
+- **`|mag|`** は時間波形と RMS / Peak に使う合成加速度で、`mag = sqrt(X^2 + Y^2 + Z^2)`（X/Y/Z は重力除去後の成分）です。
+- センサー時刻の品質が解析条件を満たさない場合、スペクトルは算出せず品質パネルで警告します。
+- 全サンプルが `{0, 0, 0}` の場合は、静止状態とセンサー値未提供を区別できないため、データを保持したまま警告しスペクトルを表示しません。
 
 ---
 
@@ -126,19 +135,36 @@ GitHub Actions で `main` ブランチへの push 時に自動デプロイされ
 | ファイル | 内容 |
 | -------- | ---- |
 | `vibration_raw_*.csv` | 時刻・ax・ay・az・動的加速度マグニチュード（単位: cm/s&sup2;） |
-| `vibration_analysis_*.json` | RMS・Peak・卓越周波数・デバイスプロファイル・加速度単位（`accelUnit`） |
+| `vibration_analysis_*.json` | RMS・Peak・卓越周波数・サンプリング品質・デバイスプロファイル（閲覧用、再取込不可） |
 | `vibration_package_*.json` | 生データ＋分析結果の統合ファイル（インポート用） |
 | `vibration_export_*.zip` | 上記すべてをまとめた ZIP |
+
+分析JSONの `magnitudeRange` は、非負の合成加速度 `|mag|` の最大値－最小値です。旧版を利用する処理との互換性のため同じ値を `peakToPeak` にも出力しますが、この互換キーは非推奨です。符号付きの軸別P-P値には `axisPeakToPeak.x/y/z` を使用してください。
 
 ### 保存先・インポートについて
 
 - **保存先の指定**：Web アプリ側では保存先（フォルダ/パス）を指定できません。保存場所はブラウザ/OS の挙動に従います（例: iOS は「ファイル」、Android は「ダウンロード」等）。Web Share API が利用できる端末では共有シートが開き、保存先アプリや場所をユーザーが選べます。
 - **インポート対象**：インポートはブラウザのファイル選択ダイアログからユーザーが選んだファイルのみを読み込みます。端末のファイルピッカーが iCloud Drive / Google Drive 等を表示する場合はそこから選択できますが、アプリ側から外部ストレージを直接参照することはできません。
+- **検証と上限**：再取込用 JSON / ZIP は形式・version・単位・有限値・時刻順を検証します。安全のため 25 MiB、120,000 サンプル、1 時間、各軸絶対値 10,000,000 cm/s² を上限とし、ZIP は展開中にもサイズを監視します。記録側にも同じサンプル数・時間上限を適用します。
+- **タイムスタンプ互換**：version 2.x は厳密な単調増加が必須です。version未記載または1.xの旧パッケージに連続する同一時刻がある場合は、サンプルを失わない小さな増分へ正規化して読み込みます。ただし周波数精度を保証できないため、品質パネルに調整件数を表示しスペクトルを抑止します。時刻の逆行は全versionで拒否します。
 
 ### 単位について
 
 - 画面表示・エクスポートは **cm/s&sup2;** を採用しています。
-- 旧形式のパッケージ（`accelUnit` 未記載）は **m/s&sup2;** とみなして読み込み時に自動換算します。
+- version 未記載または 1.x の旧パッケージで `accelUnit` がない場合は **m/s&sup2;** とみなし、自動換算します。version 2.x では単位指定が必須です。
+
+---
+
+## 開発・検証
+
+Node.js 20 以上で、追加依存なしに構文検査と単体テストを実行できます。
+
+```bash
+npm run check
+npm test
+```
+
+テストには既知周波数の正弦波、混在センサー源、サンプリングジッター／欠損、全ゼロ信号、PSD 正規化、1024/1025 点境界、旧パッケージ互換、不正インポート、HTML の構文・ARIA参照検査が含まれます。Pull Request と GitHub Pages デプロイでは Node.js 20 / 22 の両方で同じ検査を実行します。
 
 ---
 

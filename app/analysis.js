@@ -1,108 +1,464 @@
 /**
- * analysis.js - Signal processing: gravity removal, RMS, peak, FFT spectrum
+ * analysis.js - Sampling quality and vibration signal processing
  */
 const Analysis = (function () {
+  var limits = typeof VibMeterLimits !== 'undefined'
+    ? VibMeterLimits
+    : require('./limits.js');
+  var DEFAULT_GRAVITY_CUTOFF_HZ = 0.3;
+  var MIN_SPECTRUM_SAMPLES = limits.minSpectrumSamples;
+  var MIN_SPECTRUM_FS_HZ = limits.minSpectrumFsHz;
+  var MIN_SPECTRUM_DURATION_MS = limits.minSpectrumDurationMs;
+  var MAX_SPECTRUM_RESOLUTION_HZ = limits.maxSpectrumResolutionHz;
+  var MIN_PEAK_HZ = limits.minPeakHz;
+  var MAX_ABS_ACCELERATION = limits.maxAbsAccelerationCmS2;
+
+  function isFiniteNumber(value) {
+    return typeof value === 'number' && isFinite(value);
+  }
+
+  function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+  }
+
+  function vectorMagnitude(x, y, z) {
+    var scale = Math.max(Math.abs(x), Math.abs(y), Math.abs(z));
+    if (scale === 0) return 0;
+    return scale * Math.sqrt(
+      (x / scale) * (x / scale) +
+      (y / scale) * (y / scale) +
+      (z / scale) * (z / scale)
+    );
+  }
+
+  function assertValidRawSample(sample) {
+    if (!sample || !isFiniteNumber(sample.t) ||
+        !isFiniteNumber(sample.ax) || !isFiniteNumber(sample.ay) ||
+        !isFiniteNumber(sample.az) ||
+        Math.abs(sample.ax) > MAX_ABS_ACCELERATION ||
+        Math.abs(sample.ay) > MAX_ABS_ACCELERATION ||
+        Math.abs(sample.az) > MAX_ABS_ACCELERATION) {
+      throw new Error('Invalid acceleration sample.');
+    }
+  }
+
+  function median(values) {
+    if (!values || values.length === 0) return 0;
+    var sorted = values.slice().sort(function (a, b) { return a - b; });
+    var middle = Math.floor(sorted.length / 2);
+    if (sorted.length % 2) return sorted[middle];
+    return (sorted[middle - 1] + sorted[middle]) / 2;
+  }
+
+  function emptySpectrum(quantity) {
+    return {
+      freqs: new Float64Array(0),
+      power: new Float64Array(0),
+      fPeak: 0,
+      binWidthHz: 0,
+      quantity: quantity || 'powerSpectralDensity'
+    };
+  }
+
   /**
-   * Remove gravity from accelerationIncludingGravity using exponential low-pass filter.
-   * @param {Array} rawData - [{t, ax, ay, az, hasGravity}]
-   * @param {number} alpha - filter coefficient (0-1), smaller = smoother, default 0.1
-   * @returns {Array} [{t, dx, dy, dz, mag}] dynamic acceleration + magnitude
+   * Describe the timing quality of a sampled record.
+   * Sampling frequency is based on the median positive interval so that an
+   * isolated browser scheduling pause does not shift the whole frequency axis.
    */
-  function removeGravity(rawData, alpha) {
-    if (!rawData.length) return [];
-    alpha = alpha || 0.1;
+  function analyzeSampling(rawData) {
+    rawData = Array.isArray(rawData) ? rawData : [];
+    var sampleCount = rawData.length;
+    var intervals = [];
+    var invalidIntervals = 0;
+    var allZeroSignal = sampleCount > 0;
 
-    const result = [];
-    let gx = rawData[0].ax;
-    let gy = rawData[0].ay;
-    let gz = rawData[0].az;
+    for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+      var sample = rawData[sampleIndex];
+      if (sample && (sample.ax !== 0 || sample.ay !== 0 || sample.az !== 0)) {
+        allZeroSignal = false;
+        break;
+      }
+    }
 
-    for (let i = 0; i < rawData.length; i++) {
-      const d = rawData[i];
+    for (var i = 1; i < sampleCount; i++) {
+      var previousT = rawData[i - 1] && rawData[i - 1].t;
+      var currentT = rawData[i] && rawData[i].t;
+      var dt = currentT - previousT;
+      if (isFiniteNumber(previousT) && isFiniteNumber(currentT) && dt > 0) {
+        intervals.push(dt);
+      } else {
+        invalidIntervals++;
+      }
+    }
+
+    var medianDt = median(intervals);
+    var fsHz = medianDt > 0 ? 1000 / medianDt : 0;
+    var deviations = [];
+    var maxGapMs = 0;
+    var estimatedDropped = 0;
+
+    for (var j = 0; j < intervals.length; j++) {
+      if (intervals[j] > maxGapMs) maxGapMs = intervals[j];
+      if (medianDt > 0) {
+        estimatedDropped += Math.max(0, Math.round(intervals[j] / medianDt) - 1);
+        // Keep missing-sample gaps out of the jitter statistic. They are
+        // reported separately through maxGap and estimatedDropped.
+        if (intervals[j] <= medianDt * 1.5) {
+          deviations.push(intervals[j] - medianDt);
+        }
+      }
+    }
+
+    var jitterSquareSum = 0;
+    for (var deviationIndex = 0; deviationIndex < deviations.length; deviationIndex++) {
+      jitterSquareSum += deviations[deviationIndex] * deviations[deviationIndex];
+    }
+    var jitterMs = deviations.length > 0
+      ? Math.sqrt(jitterSquareSum / deviations.length)
+      : 0;
+    var jitterPercent = medianDt > 0 ? 100 * jitterMs / medianDt : 0;
+    var maxGapRatio = medianDt > 0 ? maxGapMs / medianDt : 0;
+    var expectedSamples = sampleCount + estimatedDropped;
+    var completenessPercent = expectedSamples > 0
+      ? 100 * sampleCount / expectedSamples
+      : 0;
+
+    var firstT = sampleCount > 0 && rawData[0] ? rawData[0].t : 0;
+    var lastT = sampleCount > 0 && rawData[sampleCount - 1]
+      ? rawData[sampleCount - 1].t
+      : 0;
+    var durationMs = isFiniteNumber(firstT) && isFiniteNumber(lastT) && lastT > firstT
+      ? lastT - firstT
+      : 0;
+    var nyquistHz = fsHz > 0 ? fsHz / 2 : 0;
+    var resampledCount = medianDt > 0 && durationMs > 0
+      ? Math.floor(durationMs / medianDt + 1e-9) + 1
+      : 0;
+    var frequencyResolutionHz = fsHz > 0 && resampledCount > 0
+      ? fsHz / resampledCount
+      : 0;
+
+    var enoughSamples = sampleCount >= MIN_SPECTRUM_SAMPLES &&
+      intervals.length >= MIN_SPECTRUM_SAMPLES - 1 &&
+      fsHz >= MIN_SPECTRUM_FS_HZ &&
+      durationMs >= MIN_SPECTRUM_DURATION_MS &&
+      frequencyResolutionHz > 0 &&
+      frequencyResolutionHz <= MAX_SPECTRUM_RESOLUTION_HZ;
+    var level = 'insufficient';
+    if (enoughSamples) {
+      if (invalidIntervals === 0 && jitterPercent <= 2 && maxGapRatio <= 1.5 &&
+          completenessPercent >= 98) {
+        level = 'good';
+      } else if (invalidIntervals === 0 && jitterPercent <= 10 && maxGapRatio <= 3 &&
+                 completenessPercent >= 90) {
+        level = 'fair';
+      } else {
+        level = 'poor';
+      }
+    }
+
+    // An all-zero linear-acceleration record can mean a genuinely stationary
+    // device or a browser that exposes a placeholder vector. Keep the samples,
+    // but do not present a frequency result without evidence of a signal.
+    if (allZeroSignal && enoughSamples) level = 'poor';
+
+    var spectrumUsable = !allZeroSignal && (level === 'good' || level === 'fair');
+
+    return {
+      medianDtMs: medianDt,
+      fsHz: fsHz,
+      jitterMs: jitterMs,
+      jitterPercent: jitterPercent,
+      maxGapMs: maxGapMs,
+      maxGapRatio: maxGapRatio,
+      estimatedDropped: estimatedDropped,
+      completenessPercent: completenessPercent,
+      nyquistHz: nyquistHz,
+      frequencyResolutionHz: frequencyResolutionHz,
+      level: level,
+      spectrumUsable: spectrumUsable,
+      sampleCount: sampleCount,
+      durationMs: durationMs,
+      invalidIntervals: invalidIntervals,
+      allZeroSignal: allZeroSignal
+    };
+  }
+
+  /**
+   * Remove gravity from accelerationIncludingGravity.
+   *
+   * The default low-pass coefficient is derived from each timestamp interval
+   * and a physical cutoff frequency (0.3 Hz). Passing a number retains the old
+   * API and uses that number as a fixed alpha.
+   *
+   * @param {Array} rawData - [{t, ax, ay, az, hasGravity}]
+   * @param {number|Object} options - legacy alpha, or {cutoffHz}
+   * @returns {Array} [{t, dx, dy, dz, mag}]
+   */
+  function removeGravity(rawData, options) {
+    if (!rawData || !rawData.length) return [];
+
+    var fixedAlpha = null;
+    var cutoffHz = DEFAULT_GRAVITY_CUTOFF_HZ;
+    if (typeof options === 'number' && isFinite(options)) {
+      fixedAlpha = clamp(options, 0, 1);
+    } else if (options && isFiniteNumber(options.cutoffHz)) {
+      cutoffHz = Math.max(0, options.cutoffHz);
+    }
+
+    var sampling = analyzeSampling(rawData);
+    var fallbackDtSeconds = sampling.medianDtMs > 0
+      ? sampling.medianDtMs / 1000
+      : 1 / 50;
+    var result = [];
+    var gx = 0;
+    var gy = 0;
+    var gz = 0;
+    var gravityInitialized = false;
+    var previousT = null;
+    var previousHasGravity = null;
+    var previousAx = 0;
+    var previousAy = 0;
+    var previousAz = 0;
+    var previousDx = 0;
+    var previousDy = 0;
+    var previousDz = 0;
+
+    for (var i = 0; i < rawData.length; i++) {
+      var d = rawData[i];
+      assertValidRawSample(d);
+      var dx = undefined;
+      var dy = undefined;
+      var dz = undefined;
 
       if (d.hasGravity) {
-        // Low-pass filter to estimate gravity
-        gx = alpha * d.ax + (1 - alpha) * gx;
-        gy = alpha * d.ay + (1 - alpha) * gy;
-        gz = alpha * d.az + (1 - alpha) * gz;
+        var resumingFromLinear = previousHasGravity === false &&
+          isFiniteNumber(previousT);
+        if (!gravityInitialized || resumingFromLinear) {
+          if (previousHasGravity === false) {
+            var bridgeDx = previousDx;
+            var bridgeDy = previousDy;
+            var bridgeDz = previousDz;
+            var bridgeDtSeconds = isFiniteNumber(previousT) && d.t > previousT
+              ? (d.t - previousT) / 1000
+              : fallbackDtSeconds;
+            if (bridgeDtSeconds > fallbackDtSeconds * 3) {
+              // Do not carry a stale linear value across a genuine event gap.
+              bridgeDx = 0;
+              bridgeDy = 0;
+              bridgeDz = 0;
+            }
+            // Re-anchor gravity from the last known linear acceleration. This
+            // bridges intermittent acceleration/includingGravity sources
+            // without treating their different baselines as a vibration spike.
+            gx = d.ax - bridgeDx;
+            gy = d.ay - bridgeDy;
+            gz = d.az - bridgeDz;
+            dx = bridgeDx;
+            dy = bridgeDy;
+            dz = bridgeDz;
+          } else {
+            gx = d.ax;
+            gy = d.ay;
+            gz = d.az;
+          }
+          gravityInitialized = true;
+        } else {
+          var dtSeconds = fallbackDtSeconds;
+          if (isFiniteNumber(previousT) && isFiniteNumber(d.t) && d.t > previousT) {
+            dtSeconds = (d.t - previousT) / 1000;
+          }
+          if (fixedAlpha !== null) {
+            gx = fixedAlpha * d.ax + (1 - fixedAlpha) * gx;
+            gy = fixedAlpha * d.ay + (1 - fixedAlpha) * gy;
+            gz = fixedAlpha * d.az + (1 - fixedAlpha) * gz;
+          } else if (cutoffHz === 0) {
+            dx = previousDx + d.ax - previousAx;
+            dy = previousDy + d.ay - previousAy;
+            dz = previousDz + d.az - previousAz;
+            gx = d.ax - dx;
+            gy = d.ay - dy;
+            gz = d.az - dz;
+          } else {
+            // Bilinear-transform high-pass. Both coefficients depend on the
+            // actual interval, keeping the cutoff stable across event rates.
+            var tau = 1 / (2 * Math.PI * cutoffHz);
+            var denominator = 2 * tau + dtSeconds;
+            var feedback = (2 * tau - dtSeconds) / denominator;
+            var feedforward = 2 * tau / denominator;
+            dx = feedback * previousDx + feedforward * (d.ax - previousAx);
+            dy = feedback * previousDy + feedforward * (d.ay - previousAy);
+            dz = feedback * previousDz + feedforward * (d.az - previousAz);
+            gx = d.ax - dx;
+            gy = d.ay - dy;
+            gz = d.az - dz;
+          }
+        }
 
-        const dx = d.ax - gx;
-        const dy = d.ay - gy;
-        const dz = d.az - gz;
-        const mag = Math.sqrt(dx * dx + dy * dy + dz * dz);
-
-        result.push({ t: d.t, dx, dy, dz, mag });
+        if (dx === undefined) dx = d.ax - gx;
+        if (dy === undefined) dy = d.ay - gy;
+        if (dz === undefined) dz = d.az - gz;
       } else {
-        // Already linear acceleration (no gravity)
-        const mag = Math.sqrt(d.ax * d.ax + d.ay * d.ay + d.az * d.az);
-        result.push({ t: d.t, dx: d.ax, dy: d.ay, dz: d.az, mag });
+        // DeviceMotionEvent.acceleration is already gravity-free.
+        dx = d.ax;
+        dy = d.ay;
+        dz = d.az;
       }
+
+      // Maintain one continuous state timeline regardless of which browser
+      // vector was available for this event. For linear samples, reconstruct an
+      // equivalent including-gravity input from the current gravity estimate.
+      if (d.hasGravity) {
+        previousAx = d.ax;
+        previousAy = d.ay;
+        previousAz = d.az;
+      } else if (gravityInitialized) {
+        previousAx = gx + dx;
+        previousAy = gy + dy;
+        previousAz = gz + dz;
+      } else {
+        previousAx = dx;
+        previousAy = dy;
+        previousAz = dz;
+      }
+      previousDx = dx;
+      previousDy = dy;
+      previousDz = dz;
+      previousT = d.t;
+      previousHasGravity = d.hasGravity === true;
+
+      var mag = vectorMagnitude(dx, dy, dz);
+      result.push({ t: d.t, dx: dx, dy: dy, dz: dz, mag: mag });
     }
 
     return result;
   }
 
   /**
-   * Calculate RMS of magnitude array
+   * Linearly interpolate dynamic acceleration onto an equally spaced grid.
+   * The input is not mutated.
    */
+  function resampleDynamic(dynamicData, fsHz) {
+    if (!Array.isArray(dynamicData) || dynamicData.length === 0 ||
+        !isFiniteNumber(fsHz) || fsHz <= 0) {
+      return [];
+    }
+
+    var points = [];
+    for (var i = 0; i < dynamicData.length; i++) {
+      var d = dynamicData[i];
+      if (!d || !isFiniteNumber(d.t) || !isFiniteNumber(d.dx) ||
+          !isFiniteNumber(d.dy) || !isFiniteNumber(d.dz)) {
+        continue;
+      }
+      points.push({ t: d.t, dx: d.dx, dy: d.dy, dz: d.dz });
+    }
+    points.sort(function (a, b) { return a.t - b.t; });
+
+    var unique = [];
+    for (var j = 0; j < points.length; j++) {
+      if (unique.length && points[j].t === unique[unique.length - 1].t) {
+        unique[unique.length - 1] = points[j];
+      } else {
+        unique.push(points[j]);
+      }
+    }
+    if (unique.length < 2) return [];
+
+    var stepMs = 1000 / fsHz;
+    var firstT = unique[0].t;
+    var lastT = unique[unique.length - 1].t;
+    var count = Math.floor((lastT - firstT) / stepMs + 1e-9) + 1;
+    if (count < 2 || count > 1000000) return [];
+
+    var result = [];
+    var right = 1;
+    for (var k = 0; k < count; k++) {
+      var targetT = firstT + k * stepMs;
+      while (right < unique.length - 1 && unique[right].t < targetT) right++;
+      var leftPoint = unique[right - 1];
+      var rightPoint = unique[right];
+      var span = rightPoint.t - leftPoint.t;
+      var ratio = span > 0 ? (targetT - leftPoint.t) / span : 0;
+      ratio = clamp(ratio, 0, 1);
+      var dx = leftPoint.dx + ratio * (rightPoint.dx - leftPoint.dx);
+      var dy = leftPoint.dy + ratio * (rightPoint.dy - leftPoint.dy);
+      var dz = leftPoint.dz + ratio * (rightPoint.dz - leftPoint.dz);
+      result.push({
+        t: targetT,
+        dx: dx,
+        dy: dy,
+        dz: dz,
+        mag: vectorMagnitude(dx, dy, dz)
+      });
+    }
+    return result;
+  }
+
+  /** Calculate resultant-vector RMS. */
   function calcRMS(dynamicData) {
-    if (!dynamicData.length) return 0;
-    let sum = 0;
-    for (let i = 0; i < dynamicData.length; i++) {
+    if (!dynamicData || !dynamicData.length) return 0;
+    var sum = 0;
+    for (var i = 0; i < dynamicData.length; i++) {
       sum += dynamicData[i].mag * dynamicData[i].mag;
     }
     return Math.sqrt(sum / dynamicData.length);
   }
 
-  /**
-   * Calculate peak (max absolute magnitude)
-   */
+  /** Calculate maximum resultant acceleration. */
   function calcPeak(dynamicData) {
-    if (!dynamicData.length) return 0;
-    let max = 0;
-    for (let i = 0; i < dynamicData.length; i++) {
+    if (!dynamicData || !dynamicData.length) return 0;
+    var max = 0;
+    for (var i = 0; i < dynamicData.length; i++) {
       if (dynamicData[i].mag > max) max = dynamicData[i].mag;
     }
     return max;
   }
 
-  /**
-   * Calculate peak-to-peak
-   */
+  /** Retained for export compatibility: range of the resultant magnitude. */
   function calcPeakToPeak(dynamicData) {
-    if (!dynamicData.length) return 0;
-    let min = Infinity, max = -Infinity;
-    for (let i = 0; i < dynamicData.length; i++) {
-      const v = dynamicData[i].mag;
-      if (v < min) min = v;
-      if (v > max) max = v;
+    if (!dynamicData || !dynamicData.length) return 0;
+    var min = Infinity;
+    var max = -Infinity;
+    for (var i = 0; i < dynamicData.length; i++) {
+      var value = dynamicData[i].mag;
+      if (value < min) min = value;
+      if (value > max) max = value;
     }
     return max - min;
   }
 
-  /**
-   * Estimate sampling frequency from timestamps
-   */
-  function estimateFs(rawData) {
-    if (rawData.length < 2) return 0;
-    const intervals = [];
-    for (let i = 1; i < rawData.length; i++) {
-      intervals.push(rawData[i].t - rawData[i - 1].t);
+  /** Calculate conventional signed peak-to-peak values for each axis. */
+  function calcAxisPeakToPeak(dynamicData) {
+    var result = { x: 0, y: 0, z: 0 };
+    if (!dynamicData || !dynamicData.length) return result;
+    var min = { x: Infinity, y: Infinity, z: Infinity };
+    var max = { x: -Infinity, y: -Infinity, z: -Infinity };
+    for (var i = 0; i < dynamicData.length; i++) {
+      var sample = dynamicData[i];
+      if (sample.dx < min.x) min.x = sample.dx;
+      if (sample.dx > max.x) max.x = sample.dx;
+      if (sample.dy < min.y) min.y = sample.dy;
+      if (sample.dy > max.y) max.y = sample.dy;
+      if (sample.dz < min.z) min.z = sample.dz;
+      if (sample.dz > max.z) max.z = sample.dz;
     }
-    const avg = intervals.reduce(function (a, b) { return a + b; }, 0) / intervals.length;
-    return avg > 0 ? 1000 / avg : 0;
+    result.x = max.x - min.x;
+    result.y = max.y - min.y;
+    result.z = max.z - min.z;
+    return result;
   }
 
-  /**
-   * Radix-2 Cooley-Tukey FFT (in-place)
-   * @param {Float64Array} re - real part
-   * @param {Float64Array} im - imaginary part
-   */
+  /** Estimate sampling frequency using the robust median interval. */
+  function estimateFs(rawData) {
+    return analyzeSampling(rawData).fsHz;
+  }
+
+  /** Radix-2 Cooley-Tukey FFT (in-place). */
   function fft(re, im) {
     var n = re.length;
     if (n <= 1) return;
 
-    // Bit-reversal permutation
     for (var i = 1, j = 0; i < n; i++) {
       var bit = n >> 1;
       while (j & bit) {
@@ -116,214 +472,327 @@ const Analysis = (function () {
       }
     }
 
-    // FFT butterfly
     for (var len = 2; len <= n; len *= 2) {
-      var ang = -2 * Math.PI / len;
-      var wRe = Math.cos(ang);
-      var wIm = Math.sin(ang);
-      for (var i = 0; i < n; i += len) {
-        var curRe = 1, curIm = 0;
-        for (var j = 0; j < len / 2; j++) {
-          var uRe = re[i + j], uIm = im[i + j];
-          var vRe = re[i + j + len / 2] * curRe - im[i + j + len / 2] * curIm;
-          var vIm = re[i + j + len / 2] * curIm + im[i + j + len / 2] * curRe;
-          re[i + j] = uRe + vRe;
-          im[i + j] = uIm + vIm;
-          re[i + j + len / 2] = uRe - vRe;
-          im[i + j + len / 2] = uIm - vIm;
-          var newCurRe = curRe * wRe - curIm * wIm;
-          curIm = curRe * wIm + curIm * wRe;
-          curRe = newCurRe;
+      var angle = -2 * Math.PI / len;
+      var wRe = Math.cos(angle);
+      var wIm = Math.sin(angle);
+      for (var offset = 0; offset < n; offset += len) {
+        var currentRe = 1;
+        var currentIm = 0;
+        for (var index = 0; index < len / 2; index++) {
+          var evenRe = re[offset + index];
+          var evenIm = im[offset + index];
+          var oddRe = re[offset + index + len / 2] * currentRe -
+            im[offset + index + len / 2] * currentIm;
+          var oddIm = re[offset + index + len / 2] * currentIm +
+            im[offset + index + len / 2] * currentRe;
+          re[offset + index] = evenRe + oddRe;
+          im[offset + index] = evenIm + oddIm;
+          re[offset + index + len / 2] = evenRe - oddRe;
+          im[offset + index + len / 2] = evenIm - oddIm;
+          var nextRe = currentRe * wRe - currentIm * wIm;
+          currentIm = currentRe * wIm + currentIm * wRe;
+          currentRe = nextRe;
         }
       }
     }
   }
 
-  /**
-   * Hanning window
-   */
   function hanningWindow(n) {
-    var w = new Float64Array(n);
-    for (var i = 0; i < n; i++) {
-      w[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
+    var window = new Float64Array(n);
+    if (n === 1) {
+      window[0] = 1;
+      return window;
     }
-    return w;
+    for (var i = 0; i < n; i++) {
+      window[i] = 0.5 * (1 - Math.cos(2 * Math.PI * i / (n - 1)));
+    }
+    return window;
+  }
+
+  function peakIndex(freqs, power, minPeakHz) {
+    var maxPower = 0;
+    var result = -1;
+    for (var i = 1; i < power.length; i++) {
+      if (freqs[i] >= minPeakHz && power[i] > maxPower) {
+        maxPower = power[i];
+        result = i;
+      }
+    }
+    return result;
   }
 
   /**
-   * Compute power spectrum
-   * @param {Array} series - numeric series
-   * @param {number} fs - sampling frequency
-   * @returns {{freqs: Float64Array, power: Float64Array, fPeak: number}}
+   * Compute a detrended, Hann-windowed, single-sided power spectral density.
+   * power is retained as the data property for existing chart consumers.
    */
   function computeSpectrumSeries(series, fs) {
-    if (series.length < 4) {
-      return { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
+    if (!series || series.length < 4 || !isFiniteNumber(fs) || fs <= 0) {
+      return emptySpectrum('powerSpectralDensity');
     }
 
-    // Zero-pad to next power of 2
     var rawLen = series.length;
-    var n = 1;
-    while (n < rawLen) n *= 2;
-
-    var re = new Float64Array(n);
-    var im = new Float64Array(n);
-    var win = hanningWindow(rawLen);
-
-    // Apply window and fill real part
+    var mean = 0;
     for (var i = 0; i < rawLen; i++) {
-      re[i] = series[i] * win[i];
+      if (!isFiniteNumber(series[i])) return emptySpectrum('powerSpectralDensity');
+      mean += series[i];
     }
-    // Remaining are zero (zero-padded)
+    mean /= rawLen;
+
+    var nfft = 1;
+    while (nfft < rawLen) nfft *= 2;
+    var re = new Float64Array(nfft);
+    var im = new Float64Array(nfft);
+    var window = hanningWindow(rawLen);
+    var windowPower = 0;
+
+    for (var j = 0; j < rawLen; j++) {
+      var w = window[j];
+      re[j] = (series[j] - mean) * w;
+      windowPower += w * w;
+    }
+    if (windowPower <= 0) return emptySpectrum('powerSpectralDensity');
 
     fft(re, im);
 
-    // Compute single-sided power spectrum
-    var halfN = Math.floor(n / 2);
-    var freqs = new Float64Array(halfN);
-    var power = new Float64Array(halfN);
-    var maxPower = 0;
-    var fPeak = 0;
-    var minPeakHz = 0.5;
+    var lastIndex = Math.floor(nfft / 2);
+    var length = lastIndex + 1;
+    var freqs = new Float64Array(length);
+    var power = new Float64Array(length);
+    var binWidthHz = fs / nfft;
+    var normalization = fs * windowPower;
 
-    for (var i = 0; i < halfN; i++) {
-      freqs[i] = i * fs / n;
-      power[i] = (re[i] * re[i] + im[i] * im[i]) / n;
-
-      // Skip DC component (i=0) for peak detection
-      if (i > 0 && freqs[i] >= minPeakHz && power[i] > maxPower) {
-        maxPower = power[i];
-        fPeak = freqs[i];
-      }
+    for (var k = 0; k < length; k++) {
+      freqs[k] = k * binWidthHz;
+      var value = (re[k] * re[k] + im[k] * im[k]) / normalization;
+      if (k > 0 && k < lastIndex) value *= 2;
+      power[k] = value;
     }
 
-    return { freqs: freqs, power: power, fPeak: fPeak };
+    var selectedPeak = peakIndex(freqs, power, MIN_PEAK_HZ);
+    return {
+      freqs: freqs,
+      power: power,
+      fPeak: selectedPeak >= 0 ? freqs[selectedPeak] : 0,
+      binWidthHz: binWidthHz,
+      quantity: 'powerSpectralDensity',
+      nfft: nfft,
+      sampleCount: rawLen
+    };
+  }
+
+  function combineVectorSpectrum(x, y, z) {
+    if (!x || !y || !z || !x.power.length ||
+        x.power.length !== y.power.length || x.power.length !== z.power.length) {
+      var empty = emptySpectrum('powerSpectralDensity');
+      empty.dominantAxis = null;
+      return empty;
+    }
+
+    var length = x.power.length;
+    var power = new Float64Array(length);
+    for (var i = 0; i < length; i++) {
+      power[i] = x.power[i] + y.power[i] + z.power[i];
+    }
+    var selectedPeak = peakIndex(x.freqs, power, MIN_PEAK_HZ);
+    var dominantAxis = null;
+    if (selectedPeak >= 0) {
+      dominantAxis = 'x';
+      var largest = x.power[selectedPeak];
+      if (y.power[selectedPeak] > largest) {
+        dominantAxis = 'y';
+        largest = y.power[selectedPeak];
+      }
+      if (z.power[selectedPeak] > largest) dominantAxis = 'z';
+    }
+
+    return {
+      freqs: x.freqs,
+      power: power,
+      fPeak: selectedPeak >= 0 ? x.freqs[selectedPeak] : 0,
+      binWidthHz: x.binWidthHz,
+      quantity: 'powerSpectralDensity',
+      nfft: x.nfft,
+      sampleCount: x.sampleCount,
+      dominantAxis: dominantAxis
+    };
   }
 
   /**
-   * Compute 1/3 octave spectrum from power spectrum
-   * @param {Float64Array} freqs
-   * @param {Float64Array} power
-   * @param {number} minHz
-   * @param {number} maxHz
-   * @returns {{freqs: Float64Array, power: Float64Array}}
+   * Integrate PSD bins into one-third-octave bands and return band RMS.
+   * The legacy power property now contains RMS values for chart compatibility.
    */
   function computeThirdOctaveFromPower(freqs, power, minHz, maxHz) {
-    if (!freqs || freqs.length === 0 || !power || power.length === 0) {
-      return { freqs: new Float64Array(0), power: new Float64Array(0) };
+    if (!freqs || freqs.length < 2 || !power || power.length !== freqs.length) {
+      return {
+        freqs: new Float64Array(0),
+        power: new Float64Array(0),
+        rms: new Float64Array(0),
+        bandRms: new Float64Array(0),
+        meanSquare: new Float64Array(0),
+        quantity: 'bandRms',
+        binWidthHz: 0
+      };
+    }
+
+    var binWidthHz = freqs[1] - freqs[0];
+    if (!isFiniteNumber(binWidthHz) || binWidthHz <= 0) {
+      return {
+        freqs: new Float64Array(0),
+        power: new Float64Array(0),
+        rms: new Float64Array(0),
+        bandRms: new Float64Array(0),
+        meanSquare: new Float64Array(0),
+        quantity: 'bandRms',
+        binWidthHz: 0
+      };
     }
 
     var ratio = Math.pow(2, 1 / 3);
     var edgeFactor = Math.pow(2, 1 / 6);
-    var min = isFinite(minHz) ? Math.max(0, minHz) : 0;
-    var max = isFinite(maxHz) ? maxHz : freqs[freqs.length - 1];
-
+    var min = isFiniteNumber(minHz) ? Math.max(0, minHz) : binWidthHz;
+    var max = isFiniteNumber(maxHz) ? maxHz : freqs[freqs.length - 1];
     if (max <= 0) {
-      return { freqs: new Float64Array(0), power: new Float64Array(0) };
+      return {
+        freqs: new Float64Array(0),
+        power: new Float64Array(0),
+        rms: new Float64Array(0),
+        bandRms: new Float64Array(0),
+        meanSquare: new Float64Array(0),
+        quantity: 'bandRms',
+        binWidthHz: binWidthHz
+      };
     }
 
-    if (min <= 0) {
-      min = freqs.length > 1 ? freqs[1] : 0;
-    }
-
-    var fc = 1;
-    while (fc >= min * ratio) fc /= ratio;
-    while (fc < min) fc *= ratio;
+    if (min <= 0) min = binWidthHz;
+    var center = 1;
+    while (center >= min * ratio) center /= ratio;
+    while (center < min) center *= ratio;
 
     var centers = [];
-    var bands = [];
-    var i = 1; // skip DC
-
-    while (fc <= max) {
-      var lower = fc / edgeFactor;
-      var upper = fc * edgeFactor;
-      while (i < freqs.length && freqs[i] < lower) i++;
-      var sum = 0;
-      var j = i;
-      while (j < freqs.length && freqs[j] < upper) {
-        sum += power[j];
-        j++;
+    var bandRms = [];
+    var bandMeanSquare = [];
+    var binIndex = 1;
+    while (center <= max) {
+      var lower = center / edgeFactor;
+      var upper = center * edgeFactor;
+      var meanSquare = 0;
+      while (binIndex < freqs.length && freqs[binIndex] < lower) binIndex++;
+      while (binIndex < freqs.length &&
+             freqs[binIndex] < upper && freqs[binIndex] <= max) {
+        meanSquare += Math.max(0, power[binIndex]) * binWidthHz;
+        binIndex++;
       }
-      i = j;
-      centers.push(fc);
-      bands.push(sum);
-      fc *= ratio;
+      centers.push(center);
+      bandMeanSquare.push(meanSquare);
+      bandRms.push(Math.sqrt(meanSquare));
+      center *= ratio;
     }
 
+    var rmsArray = new Float64Array(bandRms);
     return {
       freqs: new Float64Array(centers),
-      power: new Float64Array(bands)
+      power: rmsArray,
+      rms: rmsArray,
+      bandRms: rmsArray,
+      meanSquare: new Float64Array(bandMeanSquare),
+      quantity: 'bandRms',
+      binWidthHz: binWidthHz
     };
   }
 
-  /**
-   * Compute 1/3 octave spectrum for each component
-   * @param {Object} spectrum
-   * @param {number} fs
-   * @returns {{mag: Object, x: Object, y: Object, z: Object}}
-   */
   function computeThirdOctaveSpectrum(spectrum, fs) {
-    if (!spectrum || !spectrum.mag || spectrum.mag.freqs.length === 0) {
-      var empty = { freqs: new Float64Array(0), power: new Float64Array(0) };
-      return { mag: empty, x: empty, y: empty, z: empty };
+    var reference = spectrum && (spectrum.vector || spectrum.mag);
+    if (!reference || !reference.freqs || reference.freqs.length === 0) {
+      return {
+        mag: computeThirdOctaveFromPower(null, null, 0, 0),
+        x: computeThirdOctaveFromPower(null, null, 0, 0),
+        y: computeThirdOctaveFromPower(null, null, 0, 0),
+        z: computeThirdOctaveFromPower(null, null, 0, 0),
+        vector: computeThirdOctaveFromPower(null, null, 0, 0)
+      };
     }
-    var maxHz = fs > 0 ? fs / 2 : spectrum.mag.freqs[spectrum.mag.freqs.length - 1];
-    var minHz = 0.5;
+    var maxHz = fs > 0 ? fs / 2 : reference.freqs[reference.freqs.length - 1];
+    var minHz = MIN_PEAK_HZ;
+
+    function integrate(series) {
+      if (!series || !series.freqs || !series.power) {
+        return computeThirdOctaveFromPower(null, null, 0, 0);
+      }
+      return computeThirdOctaveFromPower(series.freqs, series.power, minHz, maxHz);
+    }
+
     return {
-      mag: computeThirdOctaveFromPower(spectrum.mag.freqs, spectrum.mag.power, minHz, maxHz),
-      x: computeThirdOctaveFromPower(spectrum.x.freqs, spectrum.x.power, minHz, maxHz),
-      y: computeThirdOctaveFromPower(spectrum.y.freqs, spectrum.y.power, minHz, maxHz),
-      z: computeThirdOctaveFromPower(spectrum.z.freqs, spectrum.z.power, minHz, maxHz)
+      mag: integrate(spectrum.mag),
+      x: integrate(spectrum.x),
+      y: integrate(spectrum.y),
+      z: integrate(spectrum.z),
+      vector: integrate(reference)
     };
   }
 
-  /**
-   * Compute spectrum from dynamic acceleration data (magnitude)
-   * @param {Array} dynamicData - [{t, dx, dy, dz, mag}]
-   * @param {number} fs - sampling frequency
-   * @returns {{freqs: Float64Array, power: Float64Array, fPeak: number}}
-   */
+  /** Compute the compatibility magnitude PSD. */
   function computeSpectrum(dynamicData, fs) {
     var series = new Array(dynamicData.length);
-    for (var i = 0; i < dynamicData.length; i++) {
-      series[i] = dynamicData[i].mag;
-    }
+    for (var i = 0; i < dynamicData.length; i++) series[i] = dynamicData[i].mag;
     return computeSpectrumSeries(series, fs);
   }
 
-  /**
-   * Run full analysis pipeline
-   * @param {Array} rawData - [{t, ax, ay, az, hasGravity}]
-   * @returns {Object} analysis results
-   */
-  function analyze(rawData) {
-    var fs = estimateFs(rawData);
+  /** Run the complete analysis pipeline. */
+  function analyze(rawData, options) {
+    rawData = Array.isArray(rawData) ? rawData : [];
+    options = options || {};
+    var sampling = analyzeSampling(rawData);
+    var timestampAdjustedCount = isFiniteNumber(options.timestampAdjustedCount)
+      ? Math.max(0, Math.floor(options.timestampAdjustedCount))
+      : 0;
+    if (timestampAdjustedCount > 0) {
+      sampling.timestampAdjustedCount = timestampAdjustedCount;
+      sampling.level = 'poor';
+      sampling.spectrumUsable = false;
+    }
+    var fs = sampling.fsHz;
     var dynamic = removeGravity(rawData);
-    var rms = calcRMS(dynamic);
-    var peak = calcPeak(dynamic);
-    var peakToPeak = calcPeakToPeak(dynamic);
+    var resampled = [];
+    // Time-domain metrics describe the samples that were actually observed and
+    // exported. Interpolation is used only for FFT, otherwise a sharp peak can
+    // be attenuated or a long gap can be filled with artificial samples.
+    var metricData = dynamic;
+    var rms = calcRMS(metricData);
+    var peak = calcPeak(metricData);
+    var magnitudeRange = calcPeakToPeak(metricData);
+    var axisPeakToPeak = calcAxisPeakToPeak(metricData);
 
-    var empty = { freqs: new Float64Array(0), power: new Float64Array(0), fPeak: 0 };
-    var spectrum = { mag: empty, x: empty, y: empty, z: empty };
-    var spectrumThird = { mag: empty, x: empty, y: empty, z: empty };
-    if (fs >= 10 && dynamic.length >= 16) {
-      var magSeries = new Array(dynamic.length);
-      var xSeries = new Array(dynamic.length);
-      var ySeries = new Array(dynamic.length);
-      var zSeries = new Array(dynamic.length);
-      for (var i = 0; i < dynamic.length; i++) {
-        var d = dynamic[i];
+    var spectrum = {
+      mag: emptySpectrum('powerSpectralDensity'),
+      x: emptySpectrum('powerSpectralDensity'),
+      y: emptySpectrum('powerSpectralDensity'),
+      z: emptySpectrum('powerSpectralDensity'),
+      vector: emptySpectrum('powerSpectralDensity')
+    };
+    spectrum.vector.dominantAxis = null;
+    var spectrumThird = computeThirdOctaveSpectrum(null, fs);
+
+    if (sampling.spectrumUsable) {
+      resampled = resampleDynamic(dynamic, fs);
+    }
+    if (resampled.length >= MIN_SPECTRUM_SAMPLES) {
+      var magSeries = new Array(resampled.length);
+      var xSeries = new Array(resampled.length);
+      var ySeries = new Array(resampled.length);
+      var zSeries = new Array(resampled.length);
+      for (var i = 0; i < resampled.length; i++) {
+        var d = resampled[i];
         magSeries[i] = d.mag;
         xSeries[i] = d.dx;
         ySeries[i] = d.dy;
         zSeries[i] = d.dz;
       }
-      spectrum = {
-        mag: computeSpectrumSeries(magSeries, fs),
-        x: computeSpectrumSeries(xSeries, fs),
-        y: computeSpectrumSeries(ySeries, fs),
-        z: computeSpectrumSeries(zSeries, fs)
-      };
+      spectrum.mag = computeSpectrumSeries(magSeries, fs);
+      spectrum.x = computeSpectrumSeries(xSeries, fs);
+      spectrum.y = computeSpectrumSeries(ySeries, fs);
+      spectrum.z = computeSpectrumSeries(zSeries, fs);
+      spectrum.vector = combineVectorSpectrum(spectrum.x, spectrum.y, spectrum.z);
       spectrumThird = computeThirdOctaveSpectrum(spectrum, fs);
     }
 
@@ -331,21 +800,30 @@ const Analysis = (function () {
       fsHz: fs,
       rms: rms,
       peak: peak,
-      peakToPeak: peakToPeak,
-      fPeak: spectrum.mag.fPeak,
+      // Deprecated compatibility alias. Version 2 exports use magnitudeRange.
+      peakToPeak: magnitudeRange,
+      magnitudeRange: magnitudeRange,
+      axisPeakToPeak: axisPeakToPeak,
+      fPeak: spectrum.vector.fPeak,
+      dominantAxis: spectrum.vector.dominantAxis,
       dynamic: dynamic,
       spectrum: spectrum,
       spectrumThird: spectrumThird,
+      sampling: sampling,
+      resampledSampleCount: resampled.length,
       sampleCount: rawData.length,
-      durationMs: rawData.length > 1 ? rawData[rawData.length - 1].t - rawData[0].t : 0
+      durationMs: sampling.durationMs
     };
   }
 
   return {
+    analyzeSampling: analyzeSampling,
     removeGravity: removeGravity,
+    resampleDynamic: resampleDynamic,
     calcRMS: calcRMS,
     calcPeak: calcPeak,
     calcPeakToPeak: calcPeakToPeak,
+    calcAxisPeakToPeak: calcAxisPeakToPeak,
     estimateFs: estimateFs,
     computeSpectrum: computeSpectrum,
     computeSpectrumSeries: computeSpectrumSeries,
@@ -354,3 +832,7 @@ const Analysis = (function () {
     analyze: analyze
   };
 })();
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = Analysis;
+}
