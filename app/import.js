@@ -68,7 +68,20 @@ var Import = (function () {
     return accelUnit;
   }
 
-  function validateAndNormalizeRawData(rawData, scale) {
+  function supportsLegacyEqualTimestamps(version) {
+    return version === undefined || /^1(?:\.|$)/.test(String(version));
+  }
+
+  function incrementTimestamp(timestamp) {
+    var increment = Math.max(0.001, Math.abs(timestamp) * Number.EPSILON * 2);
+    var next = timestamp + increment;
+    if (!Number.isFinite(next) || next <= timestamp) {
+      throw new Error('Sample timestamp is out of range.');
+    }
+    return next;
+  }
+
+  function validateAndNormalizeRawData(rawData, scale, allowEqualTimestamps) {
     if (!Array.isArray(rawData) || rawData.length === 0) {
       throw new Error('Package has no measurement data.');
     }
@@ -78,7 +91,9 @@ var Import = (function () {
 
     var normalized = new Array(rawData.length);
     var firstTimestamp = null;
-    var previousTimestamp = null;
+    var previousSourceTimestamp = null;
+    var previousNormalizedTimestamp = null;
+    var timestampAdjustedCount = 0;
 
     for (var i = 0; i < rawData.length; i++) {
       var sample = rawData[i];
@@ -93,8 +108,18 @@ var Import = (function () {
         throw new Error('Measurement values must be finite numbers.');
       }
 
-      if (previousTimestamp !== null && sample.t <= previousTimestamp) {
+      if (previousSourceTimestamp !== null && sample.t < previousSourceTimestamp) {
         throw new Error('Sample timestamps must increase.');
+      }
+
+      var normalizedTimestamp = sample.t;
+      if (previousNormalizedTimestamp !== null &&
+          normalizedTimestamp <= previousNormalizedTimestamp) {
+        if (!allowEqualTimestamps) {
+          throw new Error('Sample timestamps must increase.');
+        }
+        normalizedTimestamp = incrementTimestamp(previousNormalizedTimestamp);
+        timestampAdjustedCount++;
       }
 
       if (sample.hasGravity !== undefined && typeof sample.hasGravity !== 'boolean') {
@@ -117,16 +142,20 @@ var Import = (function () {
       }
 
       normalized[i] = {
-        t: sample.t,
+        t: normalizedTimestamp,
         ax: ax,
         ay: ay,
         az: az,
         hasGravity: sample.hasGravity === undefined ? true : sample.hasGravity
       };
-      previousTimestamp = sample.t;
+      previousSourceTimestamp = sample.t;
+      previousNormalizedTimestamp = normalizedTimestamp;
     }
 
-    return normalized;
+    return {
+      rawData: normalized,
+      timestampAdjustedCount: timestampAdjustedCount
+    };
   }
 
   /**
@@ -154,13 +183,18 @@ var Import = (function () {
     validateVersion(pkg.version);
     var accelUnit = getAccelUnit(pkg);
     var scale = accelUnit === 'm/s^2' ? 100 : 1;
-    var rawData = validateAndNormalizeRawData(pkg.rawData, scale);
+    var normalized = validateAndNormalizeRawData(
+      pkg.rawData,
+      scale,
+      supportsLegacyEqualTimestamps(pkg.version)
+    );
 
     return {
-      rawData: rawData,
+      rawData: normalized.rawData,
       analysis: pkg.analysis || null,
       profile: pkg.deviceProfile || null,
-      exportedAt: pkg.exportedAt || null
+      exportedAt: pkg.exportedAt || null,
+      timestampAdjustedCount: normalized.timestampAdjustedCount
     };
   }
 
@@ -326,8 +360,8 @@ var Import = (function () {
    * @param {Array} rawData
    * @returns {Object} full analysis result
    */
-  function reanalyze(rawData) {
-    return Analysis.analyze(rawData);
+  function reanalyze(rawData, options) {
+    return Analysis.analyze(rawData, options);
   }
 
   return {

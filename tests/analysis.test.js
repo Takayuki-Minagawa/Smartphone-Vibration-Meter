@@ -160,6 +160,20 @@ test('poor timing quality suppresses the spectrum instead of showing conflicting
   assert.equal(result.sampling.spectrumUsable, false);
   assert.equal(result.spectrum.vector.freqs.length, 0);
   assert.equal(result.fPeak, 0);
+  assert.equal(result.resampledSampleCount, 0);
+});
+
+test('legacy timestamp adjustments force spectrum suppression before resampling', () => {
+  const result = Analysis.analyze(
+    makeUniformSine({ fs: 50, seconds: 5, frequency: 5, amplitude: 100 }),
+    { timestampAdjustedCount: 2 }
+  );
+
+  assert.equal(result.sampling.timestampAdjustedCount, 2);
+  assert.equal(result.sampling.level, 'poor');
+  assert.equal(result.sampling.spectrumUsable, false);
+  assert.equal(result.resampledSampleCount, 0);
+  assert.equal(result.fPeak, 0);
 });
 
 test('a record shorter than the minimum resolvable duration suppresses the spectrum', () => {
@@ -252,6 +266,47 @@ test('time-based gravity removal has a consistent response across sample rates',
   assert.ok(max / min < 1.02, `sample-rate-dependent response: ${rmsValues.join(', ')}`);
 });
 
+test('gravity filtering re-anchors when linear and including-gravity sources alternate', () => {
+  const raw = [
+    { t: 0, ax: 0, ay: 0, az: 981, hasGravity: true },
+    { t: 20, ax: 0, ay: 0, az: 981, hasGravity: true },
+    { t: 40, ax: 0, ay: 0, az: 0, hasGravity: false },
+    { t: 60, ax: 0, ay: 0, az: 0, hasGravity: false },
+    // The device rotated while only linear acceleration was available.
+    { t: 1000, ax: 981, ay: 0, az: 0, hasGravity: true },
+    { t: 1020, ax: 981, ay: 0, az: 0, hasGravity: true }
+  ];
+
+  const dynamic = Analysis.removeGravity(raw);
+  assert.ok(dynamic[4].mag < 1e-9, `source transition spike: ${dynamic[4].mag}`);
+  assert.ok(dynamic[5].mag < 1e-9, `post-transition spike: ${dynamic[5].mag}`);
+
+  const continuousSwitch = Analysis.removeGravity([
+    { t: 0, ax: 0, ay: 0, az: 981, hasGravity: true },
+    { t: 20, ax: 0, ay: 0, az: 981, hasGravity: true },
+    { t: 40, ax: 25, ay: 0, az: 0, hasGravity: false },
+    { t: 60, ax: 25, ay: 0, az: 981, hasGravity: true }
+  ]);
+  approximately(continuousSwitch[3].dx, 25, 1e-9);
+});
+
+test('all-zero sessions are retained but flagged and excluded from spectra', () => {
+  const raw = Array.from({ length: 150 }, (_, index) => ({
+    t: index * 20,
+    ax: 0,
+    ay: 0,
+    az: 0,
+    hasGravity: false
+  }));
+
+  const result = Analysis.analyze(raw);
+  assert.equal(result.dynamic.length, raw.length);
+  assert.equal(result.sampling.allZeroSignal, true);
+  assert.equal(result.sampling.level, 'poor');
+  assert.equal(result.sampling.spectrumUsable, false);
+  assert.equal(result.resampledSampleCount, 0);
+});
+
 test('one-third-octave output integrates PSD into band RMS', () => {
   const fs = 100;
   const amplitude = 20;
@@ -273,6 +328,28 @@ test('one-third-octave output integrates PSD into band RMS', () => {
   assert.equal(octave.quantity, 'bandRms');
   assert.equal(octave.power, octave.rms);
   approximately(octave.rms[closest], amplitude / Math.sqrt(2), 0.5);
+});
+
+test('one-third-octave single-pass integration matches the reference band scan', () => {
+  const binWidth = 0.125;
+  const freqs = Float64Array.from({ length: 801 }, (_, index) => index * binWidth);
+  const power = Float64Array.from(freqs, (frequency) =>
+    0.2 + Math.sin(frequency * 0.37) ** 2
+  );
+  const result = Analysis.computeThirdOctaveFromPower(freqs, power, 0.5, 100);
+  const edgeFactor = 2 ** (1 / 6);
+
+  for (let band = 0; band < result.freqs.length; band++) {
+    const lower = result.freqs[band] / edgeFactor;
+    const upper = result.freqs[band] * edgeFactor;
+    let reference = 0;
+    for (let index = 1; index < freqs.length; index++) {
+      if (freqs[index] < lower) continue;
+      if (freqs[index] >= upper || freqs[index] > 100) break;
+      reference += Math.max(0, power[index]) * binWidth;
+    }
+    approximately(result.meanSquare[band], reference, 1e-12);
+  }
 });
 
 test('one-third-octave conversion accepts the legacy spectrum shape without vector', () => {

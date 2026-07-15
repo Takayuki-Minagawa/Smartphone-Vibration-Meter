@@ -66,7 +66,7 @@ test('v2 package export/import round-trip preserves package data and metadata', 
   assert.deepEqual(pkg.analysis.dominantAxis, { axis: 'x', rms: 11.5 });
   assert.equal(pkg.analysis.magnitudeRange, 20);
   assert.deepEqual(pkg.analysis.axisPeakToPeak, { x: 40, y: 10, z: 5 });
-  assert.equal(pkg.analysis.peakToPeak, undefined);
+  assert.equal(pkg.analysis.peakToPeak, 20);
   assert.deepEqual(pkg.analysis.sampling, {
     meanIntervalMs: 20,
     jitterMs: 0.4,
@@ -229,6 +229,27 @@ test('timestamps must strictly increase and duration is capped at one hour', () 
       ]
     })),
     /duration is too long/
+  );
+});
+
+test('legacy duplicate timestamps are minimally adjusted while v2 remains strict', () => {
+  const legacy = makePackage({
+    version: '1.0',
+    rawData: [
+      { t: 10, ax: 1, ay: 0, az: 0 },
+      { t: 10, ax: 2, ay: 0, az: 0 },
+      { t: 30, ax: 3, ay: 0, az: 0 }
+    ]
+  });
+  const imported = parseObject(legacy);
+  assert.equal(imported.timestampAdjustedCount, 1);
+  assert.equal(imported.rawData.length, 3);
+  assert.ok(imported.rawData[1].t > imported.rawData[0].t);
+  assert.ok(imported.rawData[2].t > imported.rawData[1].t);
+
+  assert.throws(
+    () => parseObject(makePackage({ rawData: legacy.rawData })),
+    /timestamps must increase/
   );
 });
 

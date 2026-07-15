@@ -93,6 +93,8 @@ var App = (function () {
       qualityFairMessage: '周波数結果は参考値として確認してください。',
       qualityPoorMessage: '欠損または時刻揺らぎが大きく、スペクトル解析には不向きです。',
       qualityInsufficientMessage: '品質判定に必要なサンプルが不足しています。',
+      qualityNoSignalMessage: '全サンプルが 0 です。端末が静止しているか、センサー値が提供されていない可能性があります。',
+      qualityTimestampAdjustedMessage: ' 旧形式の同一タイムスタンプを {count} 件調整したため、スペクトルは表示しません。',
       qualityBackgroundMessage: ' 計測中に画面がバックグラウンドになりました。',
       fpeakMeta: 'Hz · 主成分 {axis}',
       waveformSummary: '{duration} 秒、{samples} サンプルの X / Y / Z / |mag| 時間波形です。',
@@ -156,6 +158,8 @@ var App = (function () {
       qualityFairMessage: 'Treat frequency results as approximate.',
       qualityPoorMessage: 'Gaps or timing jitter are too large for reliable spectrum analysis.',
       qualityInsufficientMessage: 'There are not enough samples to assess quality.',
+      qualityNoSignalMessage: 'Every sample is zero. The device may be stationary, or the browser may not be providing sensor values.',
+      qualityTimestampAdjustedMessage: ' {count} duplicate legacy timestamp(s) were adjusted, so the spectrum is hidden.',
       qualityBackgroundMessage: ' The page was backgrounded during measurement.',
       fpeakMeta: 'Hz · dominant {axis}',
       waveformSummary: 'Time waveform of X / Y / Z / |mag| for {duration} s and {samples} samples.',
@@ -1201,7 +1205,15 @@ var App = (function () {
     setMetric(els.qualityNyquist, quality.nyquistHz, 1, ' Hz');
 
     if (els.qualityMessage) {
-      els.qualityMessage.textContent = t(messageKey) +
+      var qualityMessage = quality.allZeroSignal
+        ? t('qualityNoSignalMessage')
+        : t(messageKey);
+      if (isFinite(quality.timestampAdjustedCount) && quality.timestampAdjustedCount > 0) {
+        qualityMessage += t('qualityTimestampAdjustedMessage', {
+          count: Math.round(quality.timestampAdjustedCount)
+        });
+      }
+      els.qualityMessage.textContent = qualityMessage +
         (quality.backgrounded ? t('qualityBackgroundMessage') : '');
     }
   }
@@ -1590,8 +1602,19 @@ var App = (function () {
     Import.handleFile(file)
       .then(function (result) {
         if (requestId !== state.importRequestId) return;
-        var nextAnalysis = Import.reanalyze(result.rawData);
         var importedSampling = result.analysis && result.analysis.sampling;
+        var historicalTimestampAdjustments = importedSampling &&
+          typeof importedSampling.timestampAdjustedCount === 'number' &&
+          isFinite(importedSampling.timestampAdjustedCount)
+          ? Math.max(0, Math.floor(importedSampling.timestampAdjustedCount))
+          : 0;
+        var timestampAdjustedCount = Math.max(
+          result.timestampAdjustedCount || 0,
+          historicalTimestampAdjustments
+        );
+        var nextAnalysis = Import.reanalyze(result.rawData, {
+          timestampAdjustedCount: timestampAdjustedCount
+        });
         if (nextAnalysis.sampling && importedSampling && importedSampling.backgrounded === true) {
           nextAnalysis.sampling.backgrounded = true;
           if (nextAnalysis.sampling.level === 'good') nextAnalysis.sampling.level = 'fair';

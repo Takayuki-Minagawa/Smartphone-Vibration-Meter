@@ -59,14 +59,18 @@ var Export = (function () {
   /** Build the compact, JSON-safe analysis section shared by all exports. */
   function buildAnalysisSummary(analysisResult) {
     var result = analysisResult || {};
+    var magnitudeRange = result.magnitudeRange === undefined
+      ? result.peakToPeak
+      : result.magnitudeRange;
     return {
       accelUnit: ACCEL_UNIT,
       fsHz: result.fsHz,
       rms: result.rms,
       peak: result.peak,
-      magnitudeRange: result.magnitudeRange === undefined
-        ? result.peakToPeak
-        : result.magnitudeRange,
+      // Deprecated compatibility alias. Despite the historical name, this is
+      // the range of the non-negative resultant magnitude, not signed P-P.
+      peakToPeak: magnitudeRange,
+      magnitudeRange: magnitudeRange,
       axisPeakToPeak: serializableOrNull(result.axisPeakToPeak),
       fPeak: result.fPeak,
       dominantAxis: serializableOrNull(result.dominantAxis),

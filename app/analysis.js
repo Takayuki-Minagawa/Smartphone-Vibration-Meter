@@ -70,6 +70,15 @@ const Analysis = (function () {
     var sampleCount = rawData.length;
     var intervals = [];
     var invalidIntervals = 0;
+    var allZeroSignal = sampleCount > 0;
+
+    for (var sampleIndex = 0; sampleIndex < sampleCount; sampleIndex++) {
+      var sample = rawData[sampleIndex];
+      if (sample && (sample.ax !== 0 || sample.ay !== 0 || sample.az !== 0)) {
+        allZeroSignal = false;
+        break;
+      }
+    }
 
     for (var i = 1; i < sampleCount; i++) {
       var previousT = rawData[i - 1] && rawData[i - 1].t;
@@ -148,7 +157,12 @@ const Analysis = (function () {
       }
     }
 
-    var spectrumUsable = level === 'good' || level === 'fair';
+    // An all-zero linear-acceleration record can mean a genuinely stationary
+    // device or a browser that exposes a placeholder vector. Keep the samples,
+    // but do not present a frequency result without evidence of a signal.
+    if (allZeroSignal && enoughSamples) level = 'poor';
+
+    var spectrumUsable = !allZeroSignal && (level === 'good' || level === 'fair');
 
     return {
       medianDtMs: medianDt,
@@ -165,7 +179,8 @@ const Analysis = (function () {
       spectrumUsable: spectrumUsable,
       sampleCount: sampleCount,
       durationMs: durationMs,
-      invalidIntervals: invalidIntervals
+      invalidIntervals: invalidIntervals,
+      allZeroSignal: allZeroSignal
     };
   }
 
@@ -200,7 +215,8 @@ const Analysis = (function () {
     var gy = 0;
     var gz = 0;
     var gravityInitialized = false;
-    var previousGravityT = null;
+    var previousT = null;
+    var previousHasGravity = null;
     var previousAx = 0;
     var previousAy = 0;
     var previousAz = 0;
@@ -216,18 +232,41 @@ const Analysis = (function () {
       var dz = undefined;
 
       if (d.hasGravity) {
-        if (!gravityInitialized) {
-          gx = d.ax;
-          gy = d.ay;
-          gz = d.az;
+        var resumingFromLinear = previousHasGravity === false &&
+          isFiniteNumber(previousT);
+        if (!gravityInitialized || resumingFromLinear) {
+          if (previousHasGravity === false) {
+            var bridgeDx = previousDx;
+            var bridgeDy = previousDy;
+            var bridgeDz = previousDz;
+            var bridgeDtSeconds = isFiniteNumber(previousT) && d.t > previousT
+              ? (d.t - previousT) / 1000
+              : fallbackDtSeconds;
+            if (bridgeDtSeconds > fallbackDtSeconds * 3) {
+              // Do not carry a stale linear value across a genuine event gap.
+              bridgeDx = 0;
+              bridgeDy = 0;
+              bridgeDz = 0;
+            }
+            // Re-anchor gravity from the last known linear acceleration. This
+            // bridges intermittent acceleration/includingGravity sources
+            // without treating their different baselines as a vibration spike.
+            gx = d.ax - bridgeDx;
+            gy = d.ay - bridgeDy;
+            gz = d.az - bridgeDz;
+            dx = bridgeDx;
+            dy = bridgeDy;
+            dz = bridgeDz;
+          } else {
+            gx = d.ax;
+            gy = d.ay;
+            gz = d.az;
+          }
           gravityInitialized = true;
-          previousAx = d.ax;
-          previousAy = d.ay;
-          previousAz = d.az;
         } else {
           var dtSeconds = fallbackDtSeconds;
-          if (isFiniteNumber(previousGravityT) && isFiniteNumber(d.t) && d.t > previousGravityT) {
-            dtSeconds = (d.t - previousGravityT) / 1000;
+          if (isFiniteNumber(previousT) && isFiniteNumber(d.t) && d.t > previousT) {
+            dtSeconds = (d.t - previousT) / 1000;
           }
           if (fixedAlpha !== null) {
             gx = fixedAlpha * d.ax + (1 - fixedAlpha) * gx;
@@ -259,19 +298,34 @@ const Analysis = (function () {
         if (dx === undefined) dx = d.ax - gx;
         if (dy === undefined) dy = d.ay - gy;
         if (dz === undefined) dz = d.az - gz;
-        previousAx = d.ax;
-        previousAy = d.ay;
-        previousAz = d.az;
-        previousDx = dx;
-        previousDy = dy;
-        previousDz = dz;
-        previousGravityT = d.t;
       } else {
         // DeviceMotionEvent.acceleration is already gravity-free.
         dx = d.ax;
         dy = d.ay;
         dz = d.az;
       }
+
+      // Maintain one continuous state timeline regardless of which browser
+      // vector was available for this event. For linear samples, reconstruct an
+      // equivalent including-gravity input from the current gravity estimate.
+      if (d.hasGravity) {
+        previousAx = d.ax;
+        previousAy = d.ay;
+        previousAz = d.az;
+      } else if (gravityInitialized) {
+        previousAx = gx + dx;
+        previousAy = gy + dy;
+        previousAz = gz + dz;
+      } else {
+        previousAx = dx;
+        previousAy = dy;
+        previousAz = dz;
+      }
+      previousDx = dx;
+      previousDy = dy;
+      previousDz = dz;
+      previousT = d.t;
+      previousHasGravity = d.hasGravity === true;
 
       var mag = vectorMagnitude(dx, dy, dz);
       result.push({ t: d.t, dx: dx, dy: dy, dz: dz, mag: mag });
@@ -618,14 +672,16 @@ const Analysis = (function () {
     var centers = [];
     var bandRms = [];
     var bandMeanSquare = [];
+    var binIndex = 1;
     while (center <= max) {
       var lower = center / edgeFactor;
       var upper = center * edgeFactor;
       var meanSquare = 0;
-      for (var i = 1; i < freqs.length; i++) {
-        if (freqs[i] < lower) continue;
-        if (freqs[i] >= upper || freqs[i] > max) break;
-        meanSquare += Math.max(0, power[i]) * binWidthHz;
+      while (binIndex < freqs.length && freqs[binIndex] < lower) binIndex++;
+      while (binIndex < freqs.length &&
+             freqs[binIndex] < upper && freqs[binIndex] <= max) {
+        meanSquare += Math.max(0, power[binIndex]) * binWidthHz;
+        binIndex++;
       }
       centers.push(center);
       bandMeanSquare.push(meanSquare);
@@ -683,12 +739,21 @@ const Analysis = (function () {
   }
 
   /** Run the complete analysis pipeline. */
-  function analyze(rawData) {
+  function analyze(rawData, options) {
     rawData = Array.isArray(rawData) ? rawData : [];
+    options = options || {};
     var sampling = analyzeSampling(rawData);
+    var timestampAdjustedCount = isFiniteNumber(options.timestampAdjustedCount)
+      ? Math.max(0, Math.floor(options.timestampAdjustedCount))
+      : 0;
+    if (timestampAdjustedCount > 0) {
+      sampling.timestampAdjustedCount = timestampAdjustedCount;
+      sampling.level = 'poor';
+      sampling.spectrumUsable = false;
+    }
     var fs = sampling.fsHz;
     var dynamic = removeGravity(rawData);
-    var resampled = resampleDynamic(dynamic, fs);
+    var resampled = [];
     // Time-domain metrics describe the samples that were actually observed and
     // exported. Interpolation is used only for FFT, otherwise a sharp peak can
     // be attenuated or a long gap can be filled with artificial samples.
@@ -708,7 +773,10 @@ const Analysis = (function () {
     spectrum.vector.dominantAxis = null;
     var spectrumThird = computeThirdOctaveSpectrum(null, fs);
 
-    if (sampling.spectrumUsable && resampled.length >= MIN_SPECTRUM_SAMPLES) {
+    if (sampling.spectrumUsable) {
+      resampled = resampleDynamic(dynamic, fs);
+    }
+    if (resampled.length >= MIN_SPECTRUM_SAMPLES) {
       var magSeries = new Array(resampled.length);
       var xSeries = new Array(resampled.length);
       var ySeries = new Array(resampled.length);

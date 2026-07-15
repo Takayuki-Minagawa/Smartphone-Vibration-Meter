@@ -41,6 +41,17 @@ test('readMotionEvent drops incomplete and non-finite samples', () => {
     acceleration: { x: 1, y: 2, z: Number.NaN }
   }), null);
   assert.equal(Sensor.readMotionEvent({ timeStamp: 0 }), null);
+  assert.deepEqual(Sensor.readMotionEvent({
+    timeStamp: 1,
+    acceleration: { x: 0, y: 0, z: 0 }
+  }), {
+    t: 1,
+    ax: 0,
+    ay: 0,
+    az: 0,
+    hasGravity: false,
+    source: 'linear'
+  });
   assert.equal(Sensor.readMotionEvent({
     timeStamp: 0,
     acceleration: {
