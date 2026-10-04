@@ -69,6 +69,15 @@
     </select>
   </div>
 
+  <div class="recording-screen-settings">
+    <label for="keepScreenAwake">
+      <input type="checkbox" id="keepScreenAwake" checked aria-describedby="wakeLockStatus">
+      <span data-lang="ja">計測中は画面を点灯</span>
+      <span data-lang="en">Keep screen awake while recording</span>
+    </label>
+    <p id="wakeLockStatus" role="status" aria-live="polite" aria-atomic="true"></p>
+  </div>
+
   <!-- KPI -->
   <div class="card">
     <div class="card-title">
@@ -404,6 +413,12 @@
         <div class="manual-text" data-lang="en">Stabilize the phone, then press <strong>Start</strong>. Stop with <strong>Stop</strong> or Auto-stop.</div>
       </div>
       <div class="manual-block">
+        <div class="manual-title" data-lang="ja">画面の点灯維持と中断</div>
+        <div class="manual-text" data-lang="ja">「計測中は画面を点灯」で自動消灯を防ぎます。非対応・省電力設定などで使えない場合は状態欄に表示します。計測中はアプリを前面に保ってください。戻る・進む操作でページキャッシュから復帰すると、中断までのデータを解析して保存できます。再読み込み・タブ終了後の復元には対応していません。</div>
+        <div class="manual-title" data-lang="en">Screen awake and interruptions</div>
+        <div class="manual-text" data-lang="en">Keep screen awake prevents automatic screen sleep during recording when supported. The status explains when it is unavailable, for example under power-saving settings. Keep the app in the foreground. Returning through the browser's page cache analyzes the interrupted samples for export. Reloading or closing the tab does not preserve recordings.</div>
+      </div>
+      <div class="manual-block">
         <div class="manual-title" data-lang="ja">波形 / スペクトル</div>
         <div class="manual-text" data-lang="ja">時間波形の |mag| は <code>sqrt(X^2 + Y^2 + Z^2)</code> です。スペクトルのベクトル成分は <code>PSD_X + PSD_Y + PSD_Z</code> として端末の向きに依存しにくくしています。FFT はPSD、1/3オクターブは帯域RMSを表示します。成分は下のチェックで切替でき、波形は時間範囲、スペクトルは周波数範囲を指定できます。</div>
         <div class="manual-title" data-lang="en">Waveform / Spectrum</div>
@@ -457,6 +472,7 @@
 <script src="analysis.js"></script>
 <script src="export.js"></script>
 <script src="import.js"></script>
+<script src="wake-lock.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

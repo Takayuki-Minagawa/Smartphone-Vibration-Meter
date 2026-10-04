@@ -4,10 +4,10 @@
   "private": true,
   "description": "Browser-based smartphone vibration measurement and analysis",
   "scripts": {
-    "check": "node --check app/limits.js && node --check app/sensor.js && node --check app/analysis.js && node --check app/export.js && node --check app/import.js && node --check app/app.js",
+    "check": "node --check app/limits.js && node --check app/wake-lock.js && node --check app/sensor.js && node --check app/analysis.js && node --check app/export.js && node --check app/import.js && node --check app/app.js",
     "test": "node --test tests/*.test.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   }
 }

@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
 
 const Sensor = require('../app/sensor.js');
 const Limits = require('../app/limits.js');
@@ -126,4 +128,34 @@ test('startListening forwards valid samples and removes its listener', () => {
   } finally {
     global.window = originalWindow;
   }
+});
+
+test('timestamp repairs remain monotonic and mark only affected live samples', () => {
+  let listener;
+  let receiptTime = 0;
+  const sensor = vm.runInNewContext(
+    fs.readFileSync(require.resolve('../app/sensor.js'), 'utf8') + '\nSensor;',
+    {
+      VibMeterLimits: Limits,
+      performance: { now: () => receiptTime },
+      window: {
+        addEventListener(type, callback) { listener = callback; },
+        removeEventListener() {}
+      }
+    }
+  );
+  const samples = [];
+  const stop = sensor.startListening((sample) => samples.push(sample));
+  const timestamps = [0, 20, 20, 10, 80, undefined];
+  timestamps.forEach((timeStamp, index) => {
+    receiptTime = index * 20;
+    listener({ timeStamp, acceleration: { x: 1, y: 0, z: 0 } });
+  });
+  stop();
+
+  assert.deepEqual(samples.map((sample) => sample.t), [0, 20, 40, 60, 80, 100]);
+  assert.deepEqual(
+    samples.map((sample) => sample.timestampAdjusted),
+    [undefined, undefined, true, true, undefined, true]
+  );
 });

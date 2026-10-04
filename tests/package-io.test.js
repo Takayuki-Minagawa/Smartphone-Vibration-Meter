@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const Import = require('../app/import.js');
 const Export = require('../app/export.js');
+const Analysis = require('../app/analysis.js');
 
 function makePackage(overrides) {
   return Object.assign({
@@ -246,11 +247,57 @@ test('legacy duplicate timestamps are minimally adjusted while v2 remains strict
   assert.equal(imported.rawData.length, 3);
   assert.ok(imported.rawData[1].t > imported.rawData[0].t);
   assert.ok(imported.rawData[2].t > imported.rawData[1].t);
+  assert.equal(imported.rawData[0].timestampAdjusted, undefined);
+  assert.equal(imported.rawData[1].timestampAdjusted, true);
+  assert.equal(imported.rawData[2].timestampAdjusted, undefined);
 
   assert.throws(
     () => parseObject(makePackage({ rawData: legacy.rawData })),
     /timestamps must increase/
   );
+});
+
+test('timestamp repair provenance survives package round trips and reanalysis', () => {
+  const raw = Array.from({ length: 251 }, (_, index) => ({
+    t: 1000 + index * 20,
+    ax: 100 * Math.sin(2 * Math.PI * 5 * index / 50),
+    ay: 0,
+    az: 0,
+    hasGravity: false
+  }));
+  raw[10].timestampAdjusted = true;
+  const analysis = Analysis.analyze(raw);
+  const imported = Import.parsePackageJSON(Export.generatePackageJSON(raw, analysis, null));
+  assert.equal(imported.rawData[10].timestampAdjusted, true);
+  assert.equal(imported.rawData[11].timestampAdjusted, undefined);
+  assert.equal(imported.timestampAdjustedCount, 1);
+
+  // Even if the optional analysis summary is absent, raw provenance prevents
+  // repaired timestamps from acquiring a misleading valid spectrum on import.
+  const reanalyzed = Analysis.analyze(imported.rawData);
+  assert.equal(reanalyzed.sampling.timestampAdjustedCount, 1);
+  assert.equal(reanalyzed.sampling.spectrumUsable, false);
+  assert.equal(reanalyzed.fPeak, 0);
+  const roundTrip = Import.parsePackageJSON(
+    Export.generatePackageJSON(imported.rawData, reanalyzed, null)
+  );
+  assert.equal(roundTrip.timestampAdjustedCount, 1);
+  assert.equal(Analysis.analyze(roundTrip.rawData, {
+    timestampAdjustedCount: roundTrip.analysis.sampling.timestampAdjustedCount
+  }).sampling.timestampAdjustedCount, 1);
+});
+
+test('package timestamp adjustment flags must be boolean when present', () => {
+  for (const invalidFlag of ['true', 1, null, {}]) {
+    assert.throws(() => parseObject(makePackage({
+      rawData: [{ t: 0, ax: 1, ay: 0, az: 0, timestampAdjusted: invalidFlag }]
+    })), /Invalid timestamp adjustment flag/);
+  }
+  const unchanged = parseObject(makePackage({
+    rawData: [{ t: 0, ax: 1, ay: 0, az: 0, timestampAdjusted: false }]
+  }));
+  assert.equal(unchanged.timestampAdjustedCount, 0);
+  assert.equal(unchanged.rawData[0].timestampAdjusted, undefined);
 });
 
 test('sample count is capped before individual samples are processed', () => {

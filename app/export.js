@@ -95,13 +95,15 @@ var Export = (function () {
   function buildRawArray(rawData) {
     var t0 = rawData.length > 0 ? rawData[0].t : 0;
     return rawData.map(function (r) {
-      return {
+      var sample = {
         t: r.t - t0,
         ax: parseFloat(r.ax.toFixed(6)),
         ay: parseFloat(r.ay.toFixed(6)),
         az: parseFloat(r.az.toFixed(6)),
         hasGravity: typeof r.hasGravity === 'boolean' ? r.hasGravity : true
       };
+      if (r.timestampAdjusted === true) sample.timestampAdjusted = true;
+      return sample;
     });
   }
 
