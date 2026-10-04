@@ -113,13 +113,17 @@ var Import = (function () {
       }
 
       var normalizedTimestamp = sample.t;
+      var timestampAdjusted = sample.timestampAdjusted === true;
+      if (sample.timestampAdjusted !== undefined && typeof sample.timestampAdjusted !== 'boolean') {
+        throw new Error('Invalid timestamp adjustment flag.');
+      }
       if (previousNormalizedTimestamp !== null &&
           normalizedTimestamp <= previousNormalizedTimestamp) {
         if (!allowEqualTimestamps) {
           throw new Error('Sample timestamps must increase.');
         }
         normalizedTimestamp = incrementTimestamp(previousNormalizedTimestamp);
-        timestampAdjustedCount++;
+        timestampAdjusted = true;
       }
 
       if (sample.hasGravity !== undefined && typeof sample.hasGravity !== 'boolean') {
@@ -148,6 +152,10 @@ var Import = (function () {
         az: az,
         hasGravity: sample.hasGravity === undefined ? true : sample.hasGravity
       };
+      if (timestampAdjusted) {
+        normalized[i].timestampAdjusted = true;
+        timestampAdjustedCount++;
+      }
       previousSourceTimestamp = sample.t;
       previousNormalizedTimestamp = normalizedTimestamp;
     }

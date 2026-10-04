@@ -99,11 +99,12 @@ const Sensor = (function () {
         Math.abs(az) > limits.maxAbsAccelerationCmS2) {
       return null;
     }
-    const eventTimestamp = isFiniteNumber(event.timeStamp) && event.timeStamp >= 0
+    const hasEventTimestamp = isFiniteNumber(event.timeStamp) && event.timeStamp >= 0;
+    const eventTimestamp = hasEventTimestamp
       ? event.timeStamp
       : monotonicNow();
 
-    return {
+    const sample = {
       t: eventTimestamp,
       ax,
       ay,
@@ -111,6 +112,8 @@ const Sensor = (function () {
       hasGravity,
       source
     };
+    if (!hasEventTimestamp) sample.timestampAdjusted = true;
+    return sample;
   }
 
   /**
@@ -140,6 +143,7 @@ const Sensor = (function () {
         if (!isFiniteNumber(elapsed) || elapsed <= 0) elapsed = 0.001;
         sample.t = lastTimestamp + elapsed;
         if (!isFiniteNumber(sample.t) || sample.t <= lastTimestamp) return;
+        sample.timestampAdjusted = true;
       }
 
       lastTimestamp = sample.t;

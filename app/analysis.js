@@ -746,6 +746,15 @@ const Analysis = (function () {
     var timestampAdjustedCount = isFiniteNumber(options.timestampAdjustedCount)
       ? Math.max(0, Math.floor(options.timestampAdjustedCount))
       : 0;
+    var markedTimestampCount = 0;
+    for (var sampleIndex = 0; sampleIndex < rawData.length; sampleIndex++) {
+      if (rawData[sampleIndex] && rawData[sampleIndex].timestampAdjusted === true) {
+        markedTimestampCount++;
+      }
+    }
+    // Older exports stored only an aggregate count. New samples carry their
+    // own provenance, so use the larger count without counting repairs twice.
+    timestampAdjustedCount = Math.max(timestampAdjustedCount, markedTimestampCount);
     if (timestampAdjustedCount > 0) {
       sampling.timestampAdjustedCount = timestampAdjustedCount;
       sampling.level = 'poor';

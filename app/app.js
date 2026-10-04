@@ -18,6 +18,8 @@ var App = (function () {
     importRequestId: 0,
     importing: false,
     backgroundedDuringRecording: false,
+    pendingInterruptedAnalysis: false,
+    wakeLockStatus: 'idle',
     datasetProfile: null,
     currentTab: 'waveform',
     sensorAvailable: false,
@@ -35,6 +37,7 @@ var App = (function () {
     ? VibMeterLimits
     : require('./limits.js');
   var runtimeProfile = null;
+  var recordingWakeLock = null;
   var MAX_RECORDING_SAMPLES = limits.maxSamples;
   var MAX_RECORDING_DURATION_MS = limits.maxDurationMs;
   var CONSENT_VERSION = '2026-07';
@@ -61,8 +64,10 @@ var App = (function () {
       statusDone: '完了 | {samples} サンプル',
       statusNoData: 'データがありません',
       statusInterrupted: '画面遷移により計測を中断しました',
+      statusInterruptedSaved: '計測中断 | {samples} サンプルを保存できます',
       statusSensorError: 'センサー開始に失敗しました',
       statusAnalysisError: '解析に失敗しました',
+      statusRecordedDisplayError: '記録済み（表示更新に失敗）',
       statusImported: 'インポート完了',
       statusImportedAt: 'インポート完了（エクスポート日時: {date}）',
       toastCsv: 'CSV を保存/共有しました',
@@ -94,8 +99,15 @@ var App = (function () {
       qualityPoorMessage: '欠損または時刻揺らぎが大きく、スペクトル解析には不向きです。',
       qualityInsufficientMessage: '品質判定に必要なサンプルが不足しています。',
       qualityNoSignalMessage: '全サンプルが 0 です。端末が静止しているか、センサー値が提供されていない可能性があります。',
-      qualityTimestampAdjustedMessage: ' 旧形式の同一タイムスタンプを {count} 件調整したため、スペクトルは表示しません。',
+      qualityTimestampAdjustedMessage: ' タイムスタンプを {count} 件補正したため、スペクトルは表示しません。',
       qualityBackgroundMessage: ' 計測中に画面がバックグラウンドになりました。',
+      wakeLockIdle: '計測中に画面の自動消灯を防ぎます（対応端末のみ）。',
+      wakeLockOff: '画面の自動消灯防止はオフです。',
+      wakeLockRequesting: '画面の自動消灯防止を要求中...',
+      wakeLockActive: '画面の自動消灯を防止しています。',
+      wakeLockReleased: '画面の自動消灯防止が解除されました。端末の画面を確認してください。',
+      wakeLockUnavailable: '画面の自動消灯を防止できません。端末側で画面を点灯させてください。',
+      wakeLockUnsupported: 'このブラウザは画面の自動消灯防止に対応していません。',
       fpeakMeta: 'Hz · 主成分 {axis}',
       waveformSummary: '{duration} 秒、{samples} サンプルの X / Y / Z / |mag| 時間波形です。',
       spectrumSummary: 'ベクトルPSDの卓越周波数 {frequency} Hz、主成分 {axis}、周波数分解能 {resolution} Hzです。',
@@ -126,8 +138,10 @@ var App = (function () {
       statusDone: 'Done | {samples} samples',
       statusNoData: 'No data recorded',
       statusInterrupted: 'Measurement was interrupted by page navigation',
+      statusInterruptedSaved: 'Interrupted | {samples} samples available to export',
       statusSensorError: 'Failed to start the sensor',
       statusAnalysisError: 'Analysis failed',
+      statusRecordedDisplayError: 'Recorded (display refresh failed)',
       statusImported: 'Imported',
       statusImportedAt: 'Imported (exported: {date})',
       toastCsv: 'CSV saved/shared',
@@ -159,8 +173,15 @@ var App = (function () {
       qualityPoorMessage: 'Gaps or timing jitter are too large for reliable spectrum analysis.',
       qualityInsufficientMessage: 'There are not enough samples to assess quality.',
       qualityNoSignalMessage: 'Every sample is zero. The device may be stationary, or the browser may not be providing sensor values.',
-      qualityTimestampAdjustedMessage: ' {count} duplicate legacy timestamp(s) were adjusted, so the spectrum is hidden.',
+      qualityTimestampAdjustedMessage: ' {count} timestamp(s) were corrected, so the spectrum is hidden.',
       qualityBackgroundMessage: ' The page was backgrounded during measurement.',
+      wakeLockIdle: 'Keep the screen awake while recording on supported devices.',
+      wakeLockOff: 'Keeping the screen awake is turned off.',
+      wakeLockRequesting: 'Requesting screen wake lock...',
+      wakeLockActive: 'Keeping the screen awake.',
+      wakeLockReleased: 'Screen wake lock was released. Check the device screen.',
+      wakeLockUnavailable: 'Cannot keep the screen awake. Keep it on using device settings.',
+      wakeLockUnsupported: 'This browser does not support keeping the screen awake.',
       fpeakMeta: 'Hz · dominant {axis}',
       waveformSummary: 'Time waveform of X / Y / Z / |mag| for {duration} s and {samples} samples.',
       spectrumSummary: 'Vector PSD dominant frequency {frequency} Hz, dominant axis {axis}, frequency resolution {resolution} Hz.',
@@ -207,6 +228,14 @@ var App = (function () {
     state.datasetProfile = runtimeProfile;
 
     cacheDOMRefs();
+    recordingWakeLock = RecordingWakeLock.create({
+      navigator: navigator,
+      document: document,
+      onChange: function (status) {
+        state.wakeLockStatus = status;
+        updateWakeLockStatus();
+      }
+    });
     initTheme();
     initHelpLanguage();
     setupCharts();
@@ -267,6 +296,8 @@ var App = (function () {
     els.importWrap = document.getElementById('importWrap');
     els.toast = document.getElementById('toast');
     els.durationSelect = document.getElementById('durationSelect');
+    els.keepScreenAwake = document.getElementById('keepScreenAwake');
+    els.wakeLockStatus = document.getElementById('wakeLockStatus');
     els.spectrumRange = document.getElementById('spectrumRange');
     els.spectrumNote = document.getElementById('spectrumNote');
     els.spectrumMode = document.getElementById('spectrumMode');
@@ -324,12 +355,15 @@ var App = (function () {
     updateTitle();
     updateChartLabels();
     refreshStatus();
+    updateWakeLockStatus();
     updateThemeButton(document.documentElement.getAttribute('data-theme') || 'dark');
     updateZoomTitle();
     if (state.analysisResult) {
       updateKPI(state.analysisResult);
       updateQualityPanel(state.analysisResult);
       updateChartSummaries(state.analysisResult);
+    } else {
+      resetChartSummaries();
     }
   }
 
@@ -641,6 +675,14 @@ var App = (function () {
   function bindEvents() {
     els.btnStart.addEventListener('click', startRecording);
     els.btnStop.addEventListener('click', stopRecording);
+    els.keepScreenAwake.addEventListener('change', function () {
+      if (state.recording && els.keepScreenAwake.checked) {
+        recordingWakeLock.start();
+      } else {
+        recordingWakeLock.stop();
+      }
+      updateWakeLockStatus();
+    });
     els.tabWaveform.addEventListener('click', function () { switchTab('waveform'); });
     els.tabSpectrum.addEventListener('click', function () { switchTab('spectrum'); });
     els.tabWaveform.addEventListener('keydown', handleTabKeydown);
@@ -725,6 +767,7 @@ var App = (function () {
       if (state.recording && document.hidden) {
         state.backgroundedDuringRecording = true;
       }
+      recordingWakeLock.handleVisibilityChange();
     });
     window.addEventListener('pagehide', handlePageHide);
     window.addEventListener('pageshow', handlePageShow);
@@ -948,11 +991,16 @@ var App = (function () {
       state.liveUpdateTimer = null;
     }
     clearAutoStopTimer();
+    if (recordingWakeLock) recordingWakeLock.stop();
   }
 
   function handlePageHide(event) {
     var interruptedRecording = state.recording;
     var interruptedImport = state.importing;
+    if (interruptedRecording) {
+      state.pendingInterruptedAnalysis = true;
+      state.backgroundedDuringRecording = true;
+    }
     cleanupRecording();
     if (state.importing) {
       state.importRequestId += 1;
@@ -984,6 +1032,10 @@ var App = (function () {
     state.recording = false;
     state.importing = false;
     els.statusDot.classList.remove('recording');
+    if (state.pendingInterruptedAnalysis) {
+      state.pendingInterruptedAnalysis = false;
+      finishRecording(true);
+    }
     updateUI();
   }
 
@@ -992,6 +1044,7 @@ var App = (function () {
 
     cleanupRecording();
     state.recording = true;
+    state.pendingInterruptedAnalysis = false;
     state.backgroundedDuringRecording = false;
     state.recordingSessionId += 1;
     var sessionId = state.recordingSessionId;
@@ -1032,6 +1085,7 @@ var App = (function () {
     els.statusDot.classList.remove('ready');
     els.statusDot.classList.add('recording');
     setStatus('statusRecording');
+    if (els.keepScreenAwake.checked) recordingWakeLock.start();
 
     // Live update timer
     state.liveUpdateTimer = setInterval(function () {
@@ -1054,19 +1108,13 @@ var App = (function () {
 
   function stopRecording() {
     if (!state.recording) return;
-    state.recording = false;
+    cleanupRecording();
+    finishRecording(false);
+  }
 
-    if (state.stopSensor) {
-      state.stopSensor();
-      state.stopSensor = null;
-    }
-
-    if (state.liveUpdateTimer) {
-      clearInterval(state.liveUpdateTimer);
-      state.liveUpdateTimer = null;
-    }
-    clearAutoStopTimer();
-
+  // Also used after bfcache restoration. Avoid heavy analysis in pagehide,
+  // where the browser may freeze the page before it can finish.
+  function finishRecording(interrupted) {
     els.statusDot.classList.remove('recording');
     els.statusDot.classList.add('ready');
 
@@ -1080,13 +1128,24 @@ var App = (function () {
             state.analysisResult.sampling.level = 'fair';
           }
         }
-        updateKPI(state.analysisResult);
-        updateCharts(state.analysisResult);
-        updateQualityPanel(state.analysisResult);
-        setStatus('statusDone', { samples: state.rawData.length });
       } catch (error) {
         state.analysisResult = null;
         setStatus('statusAnalysisError');
+        showToast(error && error.message ? error.message : String(error));
+        updateUI();
+        return;
+      }
+      // Rendering is fallible independently of analysis. Keep a valid result
+      // exportable even if a chart fails, including after page restoration.
+      try {
+        updateKPI(state.analysisResult);
+        updateCharts(state.analysisResult);
+        updateQualityPanel(state.analysisResult);
+        setStatus(interrupted ? 'statusInterruptedSaved' : 'statusDone', {
+          samples: state.rawData.length
+        });
+      } catch (error) {
+        setStatus('statusRecordedDisplayError');
         showToast(error && error.message ? error.message : String(error));
       }
     } else {
@@ -1515,6 +1574,7 @@ var App = (function () {
     els.btnStart.disabled = !canMeasure || busy;
     els.btnStop.disabled = !canMeasure || !state.recording;
     els.durationSelect.disabled = !canMeasure || busy;
+    els.keepScreenAwake.disabled = !canMeasure || state.importing;
 
     els.importInput.disabled = busy;
     els.importWrap.classList.toggle('is-disabled', busy);
@@ -1525,6 +1585,19 @@ var App = (function () {
     els.btnJson.disabled = !hasData || busy;
     els.btnZip.disabled = !hasData || busy;
     els.btnPackage.disabled = !hasData || busy;
+  }
+
+  function updateWakeLockStatus() {
+    if (!els.wakeLockStatus) return;
+    var keys = {
+      idle: 'wakeLockIdle', requesting: 'wakeLockRequesting', active: 'wakeLockActive',
+      released: 'wakeLockReleased', unavailable: 'wakeLockUnavailable',
+      unsupported: 'wakeLockUnsupported'
+    };
+    var key = els.keepScreenAwake.checked
+      ? (keys[state.wakeLockStatus] || 'wakeLockIdle')
+      : 'wakeLockOff';
+    els.wakeLockStatus.textContent = t(key);
   }
 
   // Export handlers

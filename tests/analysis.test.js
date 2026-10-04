@@ -176,6 +176,27 @@ test('legacy timestamp adjustments force spectrum suppression before resampling'
   assert.equal(result.fPeak, 0);
 });
 
+test('sample timestamp repairs suppress spectra without double-counting stored quality', () => {
+  const raw = makeUniformSine({ fs: 50, seconds: 5, frequency: 5, amplitude: 100 });
+  const baseline = Analysis.analyze(raw);
+  assert.equal(baseline.sampling.spectrumUsable, true);
+  raw[10].timestampAdjusted = true;
+  raw[20].timestampAdjusted = true;
+
+  for (const storedCount of [undefined, 1, 2, 4]) {
+    const result = Analysis.analyze(raw, { timestampAdjustedCount: storedCount });
+    assert.equal(result.sampling.timestampAdjustedCount, Math.max(2, storedCount || 0));
+    assert.equal(result.sampling.level, 'poor');
+    assert.equal(result.sampling.spectrumUsable, false);
+    assert.equal(result.resampledSampleCount, 0);
+    assert.equal(result.fPeak, 0);
+    assert.equal(result.spectrum.vector.freqs.length, 0);
+    assert.equal(result.rms, baseline.rms);
+    assert.equal(result.peak, baseline.peak);
+    assert.equal(result.sampleCount, raw.length);
+  }
+});
+
 test('a record shorter than the minimum resolvable duration suppresses the spectrum', () => {
   const result = Analysis.analyze(makeUniformSine({
     fs: 100,
